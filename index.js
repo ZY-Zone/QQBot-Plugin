@@ -1,10 +1,11 @@
 import _ from 'lodash'
+import fsp from "node:fs/promises"
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { join } from 'node:path'
 import imageSize from 'image-size'
 import { randomUUID } from 'node:crypto'
-import { encode as encodeSilk } from 'silk-wasm'
+import { encode as encodeSilk, isSilk } from 'silk-wasm'
 import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating } from './Model/index.js'
 
 const QQBot = await (async () => {
@@ -37,36 +38,25 @@ const adapter = new class QQBotAdapter {
 
     this.sep = config.sep || ((process.platform == 'win32') && '') || ':'
   }
+  
+  async makeRecord(file) {
+    const buffer = await Bot.Buffer(file)
+    if (!Buffer.isBuffer(buffer)) return file
+    if (isSilk(buffer)) return buffer
 
-  async makeRecord (file) {
-    if (config.toBotUpload) {
-      for (const i of Bot.uin) {
-        if (!Bot[i].uploadRecord) continue
-        try {
-          const url = await Bot[i].uploadRecord(file)
-          if (url) return url
-        } catch (err) {
-          Bot.makeLog('error', ['Bot', i, '语音上传错误', file, err])
-        }
-      }
-    }
-
-    const inputFile = join('temp', randomUUID())
-    const pcmFile = join('temp', randomUUID())
-
+    const convFile = join("temp", randomUUID())
     try {
-      fs.writeFileSync(inputFile, await Bot.Buffer(file))
-      await Bot.exec(`ffmpeg -i "${inputFile}" -f s16le -ar 48000 -ac 1 "${pcmFile}"`)
-      file = Buffer.from((await encodeSilk(fs.readFileSync(pcmFile), 48000)).data)
+      await fsp.writeFile(convFile, buffer)
+      await Bot.exec(`ffmpeg -i "${convFile}" -f s16le -ar 48000 -ac 1 "${convFile}.pcm"`)
+      await Bot.exec(`silk_v3_encoder "${convFile}.pcm" "${convFile}.silk" -Fs_API 48000 -rate 48000 -tencent`)
+      file = await fsp.readFile(`${convFile}.silk`)
     } catch (err) {
-      logger.error(`silk 转码错误：${err}`)
+      Bot.makeLog("error", ["silk 转码错误", file, err])
     }
 
-    for (const i of [inputFile, pcmFile]) {
-      try {
-        fs.unlinkSync(i)
-      } catch (err) { }
-    }
+    for (const i of [convFile, `${convFile}.pcm`, `${convFile}.silk`])
+      fsp.unlink(i).catch(() => {})
+
     return file
   }
 
@@ -1172,7 +1162,7 @@ const adapter = new class QQBotAdapter {
 
     data.bot.stat.recv_msg_cnt++
     Bot[data.self_id].dau.setDau('receive_msg', data)
-    logger.info(Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data))
+    Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
   }
 
   async makeCallback (id, event) {
