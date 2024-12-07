@@ -728,7 +728,7 @@ const adapter = new class QQBotAdapter {
     return this.sendMsg(data, msg => data.bot.sdk.sendPrivateMessage(data.user_id, msg, event), msg)
   }
 
-  sendGroupMsg (data, msg, event) {
+  async sendGroupMsg (data, msg, event) {
     if (Handler.has('QQBot.group.sendMsg')) {
       const res = await Handler.call(
         'QQBot.group.sendMsg',
