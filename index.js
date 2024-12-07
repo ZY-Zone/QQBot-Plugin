@@ -1,5 +1,4 @@
 import _ from 'lodash'
-import fsp from "node:fs/promises"
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { join } from 'node:path'
@@ -28,7 +27,7 @@ const adapter = new class QQBotAdapter {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
-    this.version = 'qq-group-bot v11.45.14'
+    this.version = 'qq-official-bot v11.45.14'
 
     if (typeof config.toQRCode == 'boolean') {
       this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
@@ -46,10 +45,10 @@ const adapter = new class QQBotAdapter {
 
     const convFile = join("temp", randomUUID())
     try {
-      await fsp.writeFile(convFile, buffer)
+      fs.writeFileSync(convFile, buffer)
       await Bot.exec(`ffmpeg -i "${convFile}" -f s16le -ar 48000 -ac 1 "${convFile}.pcm"`)
       await Bot.exec(`silk_v3_encoder "${convFile}.pcm" "${convFile}.silk" -Fs_API 48000 -rate 48000 -tencent`)
-      file = await fsp.readFile(`${convFile}.silk`)
+      file = fs.readFileSync(`${convFile}.silk`)
     } catch (err) {
       Bot.makeLog("error", ["silk 转码错误", file, err])
     }
@@ -730,6 +729,23 @@ const adapter = new class QQBotAdapter {
   }
 
   sendGroupMsg (data, msg, event) {
+    if (Handler.has('QQBot.group.sendMsg')) {
+      const res = await Handler.call(
+        'QQBot.group.sendMsg',
+        data,
+        {
+          self_id: data.self_id,
+          group_id: `${data.self_id}${this.sep}${data.group_id}`,
+          raw_group_id: data.group_id,
+          user_id: data.user_id,
+          msg,
+          event
+        }
+      )
+      if (res !== false) {
+        return res
+      }
+    }
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
   }
 
@@ -934,12 +950,12 @@ const adapter = new class QQBotAdapter {
   }
 
   pickGroup (id, group_id) {
-    if (group_id.startsWith('qg_')) { return this.pickGuild(id, group_id) }
+    if (group_id.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
     const i = {
       ...Bot[id].gl.get(group_id),
       self_id: id,
       bot: Bot[id],
-      group_id: group_id.replace(`${id}${this.sep}`, '')
+      group_id: group_id.replace?.(`${id}${this.sep}`, '') || group_id
     }
     return {
       ...i,
