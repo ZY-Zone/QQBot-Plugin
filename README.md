@@ -13,6 +13,7 @@ TRSS-Yunzai QQBot 适配器 插件
 可自行搭建服务（需要有一定知识基础，进群有Python转发端例子）  
 班级群： [687976465](https://qm.qq.com/q/PCWuy2zV6u)
 <details><summary>使用TS霆生のwebhook转发服务（免费）</summary>  
+
 ## 为了防止滥用，此功能需要进群联系管理员授权服务。  
 1. QQ机器人后台回调配置链接：`https://ts.elaina.vin/webhook?secret={secret}`，`{secret}`替换为`bot secret`，配置回调链接不用，未授权的secret将不会推送消息给ws
 2. 插件ws连接配置：`ws://ts.elaina.vin:8000/ws/{secret}`，`{secret}`替换为`bot secret`  
