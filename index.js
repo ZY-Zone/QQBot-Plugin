@@ -54,7 +54,7 @@ const adapter = new class QQBotAdapter {
     }
 
     for (const i of [convFile, `${convFile}.pcm`, `${convFile}.silk`])
-      fs.unlink(i).catch(() => {})
+      fs.unlinkSync(i).catch(() => {})
 
     return file
   }
