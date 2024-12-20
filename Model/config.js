@@ -6,6 +6,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   tips: '',
   WsUrl: { 114514: 'ws://...' },
   permission: 'master',
+  dauDB: 'redis',
   toQRCode: true,
   toCallback: true,
   toBotUpload: true,
@@ -25,7 +26,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   simplifiedSdkLog: false,
   markdownImgScale: 1.0,
   sep: '',
-  dauDB: 'redis',
+  addGroupUseEventID: true,
   bot: {
     sandbox: false,
     maxRetry: Infinity,

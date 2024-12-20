@@ -1285,12 +1285,16 @@ const adapter = new class QQBotAdapter {
                 msg = i
               }
               if (msg?.length > 0) {
-                this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
+                if (event.event_id && config?.addGroupUseEventID){
+                  msg.unshift({ type: 'reply', id: `event_${event.event_id}` })
+                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
+                } else {
+                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
+                }
               }
             })
           }
         }
-        //此处添加上报入群事件： Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
         Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
         return
       case 'decrease':
@@ -1307,11 +1311,10 @@ const adapter = new class QQBotAdapter {
         Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
         break
       default:
-        // console.log('event', event)
         Bot.makeLog('warn', ['未知通知', event], id)
     }
 
-    // Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
+    Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
   }
 
   getFriendMap (id) {
@@ -1512,21 +1515,15 @@ export class QQBotAdapter extends plugin {
   }
 
   help () {
-    this.reply([' ', segment.button(
-      [
-        { text: 'dau', callback: '#QQBotdau' },
-        { text: 'daupro', callback: '#QQBotdaupro' },
-        { text: '调用统计', callback: '#QQBot调用统计' },
-        { text: '用户统计', callback: '#QQBot用户统计' }
-      ],
-      [
-        { text: `${config.toCallback ? '关闭' : '开启'}按钮回调`, callback: `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}` },
-        { text: `${config.callStats ? '关闭' : '开启'}调用统计`, callback: `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}` }
-      ],
-      [
-        { text: `${config.userStats ? '关闭' : '开启'}用户统计`, callback: `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}` }
-      ]
-    )])
+    this.reply([
+    '#QQBotdau',
+    '#QQBotdaupro', 
+    '#QQBot调用统计',
+    '#QQBot用户统计',
+    `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}`,
+    `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}`,
+    `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}` 
+    ].join('\n'))
   }
 
   refConfig () {

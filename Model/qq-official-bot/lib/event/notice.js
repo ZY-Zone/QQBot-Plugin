@@ -5,6 +5,8 @@ const _1 = require("..");
 class NoticeEvent {
     constructor(bot, payload) {
         this.bot = bot;
+        this.event_id = payload.event_id;
+        this.notice_id = payload.id;
     }
 }
 exports.NoticeEvent = NoticeEvent;
@@ -13,8 +15,6 @@ class ActionNoticeEvent extends NoticeEvent {
         super(bot, payload);
         this.replied = false;
         this.sub_type = 'action';
-        this.event_id = payload.event_id;
-        this.notice_id = payload.id;
         this.data = payload.data;
     }
     /**
