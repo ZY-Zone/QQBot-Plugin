@@ -54,7 +54,7 @@ const adapter = new class QQBotAdapter {
       Bot.makeLog("error", ["silk 转码错误", file, err])
     }
 
-    for (const i of [inputFile, pcmFile]) {
+    for (const i of [convFile, `${convFile}.pcm`, `${convFile}.silk`]) {
       try {
         fs.unlinkSync(i)
       } catch (err) { }
