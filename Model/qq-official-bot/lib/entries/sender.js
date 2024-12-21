@@ -25,6 +25,7 @@ class Sender {
             srv_send_msg: true
         };
         this.contentType = 'application/json';
+        this.messagePayload.event_id = source.event_id;
         this.messagePayload.msg_id = source.id;
     }
     getType(type) {

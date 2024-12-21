@@ -19,6 +19,7 @@ const startTime = new Date()
 logger.info(logger.yellow('- 正在加载 QQBot 适配器插件'))
 
 const userIdCache = {}
+var btneventid = {}
 const markdown_template = await importJS('Model/template/markdownTemplate.js', 'default')
 const TmplPkg = await importJS('templates/index.js')
 
@@ -716,7 +717,7 @@ const adapter = new class QQBotAdapter {
     } else {
       msgs = await this.makeMsg(data, msg)
     }
-
+    
     if (await sendMsg() === false) {
       msgs = await this.makeMsg(data, msg)
       await sendMsg()
@@ -747,6 +748,9 @@ const adapter = new class QQBotAdapter {
       if (res !== false) {
         return res
       }
+    }
+    if (btneventid[`group_${data.group_id}`]){
+         event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
     }
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
   }
@@ -1048,10 +1052,11 @@ const adapter = new class QQBotAdapter {
     let logStat = filterLog.includes(_.trim(data.raw_message)) ? 'debug' : 'info'
     Bot.makeLog(logStat, `群消息：[${data.group_id}, ${data.user_id}] ${data.raw_message}`, data.self_id)
 
-    data.reply = msg => this.sendGroupMsg({
+    data.reply = msg => {
+     this.sendGroupMsg({
       ...data, group_id: event.group_id
     }, msg, { id: data.message_id })
-    // data.message.unshift({ type: "at", qq: data.self_id })
+    }
     await this.setGroupMap(data)
   }
 
@@ -1237,14 +1242,15 @@ const adapter = new class QQBotAdapter {
         data.message_type = 'private'
         Bot.makeLog('info', [`好友按钮点击事件：[${data.user_id}]`, data.raw_message], data.self_id)
 
-        data.reply = msg => this.sendFriendMsg({ ...data, user_id: event.operator_id }, msg, { id: data.message_id })
+        data.reply = msg => this.sendFriendMsg({ ...data, user_id: event.operator_id }, msg, { event_id: data.message_id })
         await this.setFriendMap(data)
         break
       case 'group':
         data.group_id = `${id}${this.sep}${event.group_id}`
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
-
-        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { id: data.message_id })
+        btneventid[`group_${event.group_id}`] = data.message_id
+        setTimeout(() => delete btneventid[`group_${event.group_id}`], 300000)
+        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { event_id: data.message_id })
         await this.setGroupMap(data)
         break
       case 'guild':
@@ -1286,8 +1292,7 @@ const adapter = new class QQBotAdapter {
               }
               if (msg?.length > 0) {
                 if (event.event_id && config?.addGroupUseEventID){
-                  msg.unshift({ type: 'reply', id: `event_${event.event_id}` })
-                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
+                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg, { event_id: event.event_id }), msg)
                 } else {
                   this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
                 }
