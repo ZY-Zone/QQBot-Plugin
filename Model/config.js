@@ -15,6 +15,14 @@ let { config, configSave } = await makeConfig('QQBot', {
   toImg: true,
   callStats: false,
   userStats: false,
+  callbacks: {
+    open: true,
+    url: 'http://yue1314.asia/callback',
+    appid: 'appid',
+    group: 'group',
+    msg: 'msg',
+    id: 'id',
+  },
   markdown: {
     template: 'abcdefghij'
   },

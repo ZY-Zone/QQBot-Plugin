@@ -1,6 +1,7 @@
 import _ from 'lodash'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
+import fetch from 'node-fetch'
 import { join } from 'node:path'
 import imageSize from 'image-size'
 import { randomUUID } from 'node:crypto'
@@ -37,6 +38,7 @@ const adapter = new class QQBotAdapter {
     }
 
     this.sep = config.sep || ((process.platform == 'win32') && '') || ':'
+    this.rawgroup = {}
   }
   
   async makeRecord(file) {
@@ -60,6 +62,22 @@ const adapter = new class QQBotAdapter {
       } catch (err) { }
     }
     return file
+  }
+
+  async callbacks (appid, group, msg = 'TS_callback', id = '5201314') {
+    try {
+      const res = await (await fetch(`${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`)).text();
+      logger.info(`request：${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`, res);
+      return res
+    } catch(err) {
+      logger.error(`callbacks请求失败：${err}`);
+      return ''
+    }
+  }
+
+  setrawgroup (openid, group) {
+    this.rawgroup[openid] = group
+    return this.rawgroup[openid]
   }
 
   async makeQRCode (data) {
@@ -573,7 +591,7 @@ const adapter = new class QQBotAdapter {
           i = { type: 'text', text: `文件：${i.file}` }
           break
         case 'reply':
-          if (i.id.startsWith('event_')) {
+          if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -750,7 +768,18 @@ const adapter = new class QQBotAdapter {
       }
     }
     if (btneventid[`group_${data.group_id}`]){
+       event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+    } else if(config.callbacks.open && this.rawgroup[data.group_id]) {
+      await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
+      let i = 0
+      while (i < 10) {
+        if (btneventid[`group_${data.group_id}`]){
          event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+         break
+        }
+        i++
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
     }
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
   }
@@ -1395,10 +1424,13 @@ const adapter = new class QQBotAdapter {
       fl: await this.getFriendMap(id),
 
       pickMember: (group_id, user_id) => this.pickMember(id, group_id, user_id),
+      setrawgroup: (openid, group) => this.setrawgroup(openid, group),
+      callbacks: async (group, msg, btnid) => await this.callbacks(opts.appid, group, msg, btnid),
       pickGroup: group_id => this.pickGroup(id, group_id),
       getGroupMap () { return this.gl },
       gl: await this.getGroupMap(id),
       gml: await this.getMemberMap(id),
+      btneventid,
 
       dau: new Dau(id, this.sep, config.dauDB),
 
