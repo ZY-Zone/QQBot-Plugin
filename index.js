@@ -259,7 +259,7 @@ const adapter = new class QQBotAdapter {
           button.push(...this.makeButtons(data, i.data))
           break
         case 'reply':
-          if (i.id.startsWith('event_')) {
+          if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -483,7 +483,7 @@ const adapter = new class QQBotAdapter {
           button.push(...this.makeButtons(data, i.data))
           break
         case 'reply':
-          if (i.id.startsWith('event_')) {
+          if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -811,7 +811,7 @@ const adapter = new class QQBotAdapter {
           i = { type: 'text', text: `文件：${i.file}` }
           break
         case 'reply':
-          if (i.id.startsWith('event_')) {
+          if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
