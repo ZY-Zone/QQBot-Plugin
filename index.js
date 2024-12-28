@@ -25,7 +25,7 @@ const markdown_template = await importJS('Model/template/markdownTemplate.js', '
 const TmplPkg = await importJS('templates/index.js')
 
 const adapter = new class QQBotAdapter {
-  constructor () {
+  constructor() {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
@@ -39,8 +39,9 @@ const adapter = new class QQBotAdapter {
 
     this.sep = config.sep || ((process.platform == 'win32') && '') || ':'
     this.rawgroup = {}
+    this.appid = {}
   }
-  
+
   async makeRecord(file) {
     const buffer = await Bot.Buffer(file)
     if (!Buffer.isBuffer(buffer)) return file
@@ -64,27 +65,27 @@ const adapter = new class QQBotAdapter {
     return file
   }
 
-  async callbacks (appid, group, msg = 'TS_callback', id = '5201314') {
+  async callbacks(appid, group, msg = 'TS_callback', id = '5201314') {
     try {
       const res = await (await fetch(`${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`)).text();
       logger.info(`request：${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`, res);
       return res
-    } catch(err) {
+    } catch (err) {
       logger.error(`callbacks请求失败：${err}`);
       return ''
     }
   }
 
-  setrawgroup (openid, group) {
+  setrawgroup(openid, group) {
     this.rawgroup[openid] = group
     return this.rawgroup[openid]
   }
 
-  async makeQRCode (data) {
+  async makeQRCode(data) {
     return (await QRCode.toDataURL(data)).replace('data:image/png;base64,', 'base64://')
   }
 
-  async makeRawMarkdownText (data, text, button) {
+  async makeRawMarkdownText(data, text, button) {
     const match = text.match(this.toQRCodeRegExp)
     if (match) {
       for (const url of match) {
@@ -96,7 +97,7 @@ const adapter = new class QQBotAdapter {
     return text.replace(/@/g, '@​')
   }
 
-  async makeBotImage (file) {
+  async makeBotImage(file) {
     if (config.toBotUpload) {
       for (const i of Bot.uin) {
         if (!Bot[i].uploadImage) continue
@@ -110,7 +111,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  async makeMarkdownImage (data, file, summary = '图片') {
+  async makeMarkdownImage(data, file, summary = '图片') {
     const buffer = await Bot.Buffer(file)
     const image =
       await this.makeBotImage(buffer) ||
@@ -135,7 +136,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  makeButton (data, button) {
+  makeButton(data, button) {
     const msg = {
       id: randomUUID(),
       render_data: {
@@ -205,7 +206,7 @@ const adapter = new class QQBotAdapter {
     return msg
   }
 
-  makeButtons (data, button_square) {
+  makeButtons(data, button_square) {
     const msgs = []
     for (const button_row of button_square) {
       const buttons = []
@@ -218,7 +219,7 @@ const adapter = new class QQBotAdapter {
     return msgs
   }
 
-  async makeRawMarkdownMsg (data, msg) {
+  async makeRawMarkdownMsg(data, msg) {
     const messages = []
     const button = []
     let content = ''
@@ -300,7 +301,7 @@ const adapter = new class QQBotAdapter {
     return messages
   }
 
-  makeMarkdownText (data, text, button) {
+  makeMarkdownText(data, text, button) {
     const match = text.match(this.toQRCodeRegExp)
     if (match) {
       for (const url of match) {
@@ -311,7 +312,7 @@ const adapter = new class QQBotAdapter {
     return text.replace(/\n/g, '\r').replace(/@/g, '@​')
   }
 
-  makeMarkdownTemplate (data, template) {
+  makeMarkdownTemplate(data, template) {
     let keys; let custom_template_id; let params = []; let index = 0; let type = 0
     const result = []
     if (markdown_template) {
@@ -372,7 +373,7 @@ const adapter = new class QQBotAdapter {
     return result
   }
 
-  async makeMarkdownMsg (data, msg) {
+  async makeMarkdownMsg(data, msg) {
     const messages = []
     const button = []
     let template = []
@@ -554,7 +555,7 @@ const adapter = new class QQBotAdapter {
     return messages
   }
 
-  async makeMsg (data, msg) {
+  async makeMsg(data, msg) {
     const sendType = ['audio', 'image', 'video', 'file']
     const messages = []
     const button = []
@@ -669,7 +670,7 @@ const adapter = new class QQBotAdapter {
     return messages
   }
 
-  async sendMsg (data, send, msg) {
+  async sendMsg(data, send, msg) {
     const rets = { message_id: [], data: [], error: [] }
     let msgs
 
@@ -735,7 +736,7 @@ const adapter = new class QQBotAdapter {
     } else {
       msgs = await this.makeMsg(data, msg)
     }
-    
+
     if (await sendMsg() === false) {
       msgs = await this.makeMsg(data, msg)
       await sendMsg()
@@ -745,11 +746,11 @@ const adapter = new class QQBotAdapter {
     return rets
   }
 
-  sendFriendMsg (data, msg, event) {
+  sendFriendMsg(data, msg, event) {
     return this.sendMsg(data, msg => data.bot.sdk.sendPrivateMessage(data.user_id, msg, event), msg)
   }
 
-  async sendGroupMsg (data, msg, event) {
+  async sendGroupMsg(data, msg, event) {
     if (Handler.has('QQBot.group.sendMsg')) {
       const res = await Handler.call(
         'QQBot.group.sendMsg',
@@ -767,15 +768,15 @@ const adapter = new class QQBotAdapter {
         return res
       }
     }
-    if (btneventid[`group_${data.group_id}`]){
-       event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-    } else if(config.callbacks.open && this.rawgroup[data.group_id]) {
+    if (btneventid[`group_${data.group_id}`]) {
+      event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+    } else if (config.callbacks.open && this.rawgroup[data.group_id]) {
       await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
       let i = 0
       while (i < 10) {
-        if (btneventid[`group_${data.group_id}`]){
-         event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-         break
+        if (btneventid[`group_${data.group_id}`]) {
+          event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+          break
         }
         i++
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -784,7 +785,7 @@ const adapter = new class QQBotAdapter {
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
   }
 
-  async makeGuildMsg (data, msg) {
+  async makeGuildMsg(data, msg) {
     const messages = []
     let message = []
     let reply
@@ -861,7 +862,7 @@ const adapter = new class QQBotAdapter {
     return messages
   }
 
-  async sendGMsg (data, send, msg) {
+  async sendGMsg(data, send, msg) {
     const rets = { message_id: [], data: [], error: [] }
     let msgs
 
@@ -892,7 +893,7 @@ const adapter = new class QQBotAdapter {
     return rets
   }
 
-  async sendDirectMsg (data, msg, event) {
+  async sendDirectMsg(data, msg, event) {
     if (!data.guild_id) {
       if (!data.src_guild_id) {
         Bot.makeLog('error', [`发送频道私聊消息失败：[${data.user_id}] 不存在来源频道信息`, msg], data.self_id)
@@ -909,7 +910,7 @@ const adapter = new class QQBotAdapter {
     return this.sendGMsg(data, msg => data.bot.sdk.sendDirectMessage(data.guild_id, msg, event), msg)
   }
 
-  async recallMsg (data, recall, message_id) {
+  async recallMsg(data, recall, message_id) {
     if (!Array.isArray(message_id)) message_id = [message_id]
     const msgs = []
     for (const i of message_id) {
@@ -923,31 +924,31 @@ const adapter = new class QQBotAdapter {
     return msgs
   }
 
-  recallFriendMsg (data, message_id) {
+  recallFriendMsg(data, message_id) {
     Bot.makeLog('info', `撤回好友消息：[${data.user_id}] ${message_id}`, data.self_id)
     return this.recallMsg(data, i => data.bot.sdk.recallFriendMessage(data.user_id, i), message_id)
   }
 
-  recallGroupMsg (data, message_id) {
+  recallGroupMsg(data, message_id) {
     Bot.makeLog('info', `撤回群消息：[${data.group_id}] ${message_id}`, data.self_id)
     return this.recallMsg(data, i => data.bot.sdk.recallGroupMessage(data.group_id, i), message_id)
   }
 
-  recallDirectMsg (data, message_id, hide = config.hideGuildRecall) {
+  recallDirectMsg(data, message_id, hide = config.hideGuildRecall) {
     Bot.makeLog('info', `撤回${hide ? '并隐藏' : ''}频道私聊消息：[${data.guild_id}] ${message_id}`, data.self_id)
     return this.recallMsg(data, i => data.bot.sdk.recallDirectMessage(data.guild_id, i, hide), message_id)
   }
 
-  recallGuildMsg (data, message_id, hide = config.hideGuildRecall) {
+  recallGuildMsg(data, message_id, hide = config.hideGuildRecall) {
     Bot.makeLog('info', `撤回${hide ? '并隐藏' : ''}频道消息：[${data.channel_id}] ${message_id}`, data.self_id)
     return this.recallMsg(data, i => data.bot.sdk.recallGuildMessage(data.channel_id, i, hide), message_id)
   }
 
-  sendGuildMsg (data, msg, event) {
+  sendGuildMsg(data, msg, event) {
     return this.sendGMsg(data, msg => data.bot.sdk.sendGuildMessage(data.channel_id, msg, event), msg)
   }
 
-  pickFriend (id, user_id) {
+  pickFriend(id, user_id) {
     if (config.toQQUin && userIdCache[user_id]) user_id = userIdCache[user_id]
     if (user_id.startsWith('qg_')) return this.pickGuildFriend(id, user_id)
 
@@ -965,7 +966,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  pickMember (id, group_id, user_id) {
+  pickMember(id, group_id, user_id) {
     if (config.toQQUin && userIdCache[user_id]) {
       user_id = userIdCache[user_id]
     }
@@ -984,7 +985,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  pickGroup (id, group_id) {
+  pickGroup(id, group_id) {
     if (group_id.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
     const i = {
       ...Bot[id].gl.get(group_id),
@@ -1001,7 +1002,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  pickGuildFriend (id, user_id) {
+  pickGuildFriend(id, user_id) {
     const i = {
       ...Bot[id].fl.get(user_id),
       self_id: id,
@@ -1015,7 +1016,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  pickGuildMember (id, group_id, user_id) {
+  pickGuildMember(id, group_id, user_id) {
     const guild_id = group_id.replace(/^qg_/, '').split('-')
     const i = {
       ...Bot[id].fl.get(user_id),
@@ -1034,7 +1035,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  pickGuild (id, group_id) {
+  pickGuild(id, group_id) {
     const guild_id = group_id.replace(/^qg_/, '').split('-')
     const i = {
       ...Bot[id].gl.get(group_id),
@@ -1052,7 +1053,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  async makeFriendMessage (data, event) {
+  async makeFriendMessage(data, event) {
     data.sender = {
       user_id: `${data.self_id}${this.sep}${event.sender.user_id}`
     }
@@ -1063,7 +1064,7 @@ const adapter = new class QQBotAdapter {
     await this.setFriendMap(data)
   }
 
-  async makeGroupMessage (data, event) {
+  async makeGroupMessage(data, event) {
     data.sender = {
       user_id: `${data.self_id}${this.sep}${event.sender.user_id}`
     }
@@ -1082,14 +1083,14 @@ const adapter = new class QQBotAdapter {
     Bot.makeLog(logStat, `群消息：[${data.group_id}, ${data.user_id}] ${data.raw_message}`, data.self_id)
 
     data.reply = msg => {
-     this.sendGroupMsg({
-      ...data, group_id: event.group_id
-    }, msg, { id: data.message_id })
+      this.sendGroupMsg({
+        ...data, group_id: event.group_id
+      }, msg, { id: data.message_id })
     }
     await this.setGroupMap(data)
   }
 
-  async makeDirectMessage (data, event) {
+  async makeDirectMessage(data, event) {
     data.sender = {
       ...data.bot.fl.get(`qg_${event.sender.user_id}`),
       ...event.sender,
@@ -1110,7 +1111,7 @@ const adapter = new class QQBotAdapter {
     await this.setFriendMap(data)
   }
 
-  async makeGuildMessage (data, event) {
+  async makeGuildMessage(data, event) {
     data.message_type = 'group'
     data.sender = {
       ...data.bot.fl.get(`qg_${event.sender.user_id}`),
@@ -1140,7 +1141,7 @@ const adapter = new class QQBotAdapter {
     await this.setGroupMap(data)
   }
 
-  async setFriendMap (data) {
+  async setFriendMap(data) {
     if (!data.user_id) return
     await data.bot.fl.set(data.user_id, {
       ...data.bot.fl.get(data.user_id),
@@ -1148,7 +1149,7 @@ const adapter = new class QQBotAdapter {
     })
   }
 
-  async setGroupMap (data) {
+  async setGroupMap(data) {
     if (!data.group_id) return
     await data.bot.gl.set(data.group_id, {
       ...data.bot.gl.get(data.group_id),
@@ -1165,7 +1166,7 @@ const adapter = new class QQBotAdapter {
     })
   }
 
-  async makeMessage (id, event) {
+  async makeMessage(id, event) {
     const data = {
       raw: event,
       bot: Bot[id],
@@ -1174,7 +1175,7 @@ const adapter = new class QQBotAdapter {
       message_type: event.message_type,
       sub_type: event.sub_type,
       message_id: event.message_id,
-      get user_id () { return this.sender.user_id },
+      get user_id() { return this.sender.user_id },
       message: event.message,
       raw_message: event.raw_message
     }
@@ -1217,7 +1218,7 @@ const adapter = new class QQBotAdapter {
     Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
   }
 
-  async makeCallback (id, event) {
+  async makeCallback(id, event) {
     const reply = event.reply.bind(event)
     event.reply = async (...args) => {
       try {
@@ -1235,7 +1236,7 @@ const adapter = new class QQBotAdapter {
       message_id: event.event_id ? `event_${event.event_id}` : event.notice_id,
       message_type: event.notice_type,
       sub_type: 'callback',
-      get user_id () { return this.sender.user_id },
+      get user_id() { return this.sender.user_id },
       sender: { user_id: `${id}${this.sep}${event.operator_id}` },
       message: [],
       raw_message: ''
@@ -1291,7 +1292,7 @@ const adapter = new class QQBotAdapter {
     Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
   }
 
-  makeNotice (id, event) {
+  makeNotice(id, event) {
     const data = {
       raw: event,
       bot: Bot[id],
@@ -1320,7 +1321,7 @@ const adapter = new class QQBotAdapter {
                 msg = i
               }
               if (msg?.length > 0) {
-                if (event.event_id && config?.addGroupUseEventID){
+                if (event.event_id && config?.addGroupUseEventID) {
                   this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg, { event_id: event.event_id }), msg)
                 } else {
                   this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
@@ -1351,19 +1352,19 @@ const adapter = new class QQBotAdapter {
     Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
   }
 
-  getFriendMap (id) {
+  getFriendMap(id) {
     return Bot.getMap(`${this.path}${id}/Friend`)
   }
 
-  getGroupMap (id) {
+  getGroupMap(id) {
     return Bot.getMap(`${this.path}${id}/Group`)
   }
 
-  getMemberMap (id) {
+  getMemberMap(id) {
     return Bot.getMap(`${this.path}${id}/Member`)
   }
 
-  async connect (token) {
+  async connect(token) {
     token = token.split(':')
     const id = token[0]
     const opts = {
@@ -1390,13 +1391,13 @@ const adapter = new class QQBotAdapter {
     Bot[id] = {
       adapter: this,
       sdk: new QQBot(opts),
-      login () {
+      login() {
         return new Promise(resolve => {
           this.sdk.sessionManager.once('READY', resolve)
           this.sdk.start()
         })
       },
-      logout () {
+      logout() {
         return new Promise(resolve => {
           this.sdk.ws.once('close', resolve)
           this.sdk.stop()
@@ -1405,8 +1406,8 @@ const adapter = new class QQBotAdapter {
 
       uin: id,
       info: { id, ...opts },
-      get nickname () { return this.sdk.nickname },
-      get avatar () { return `https://q.qlogo.cn/g?b=qq&s=0&nk=${id}` },
+      get nickname() { return this.sdk.nickname },
+      get avatar() { return `https://q.qlogo.cn/g?b=qq&s=0&nk=${id}` },
 
       version: {
         id: this.id,
@@ -1419,15 +1420,15 @@ const adapter = new class QQBotAdapter {
       },
 
       pickFriend: user_id => this.pickFriend(id, user_id),
-      get pickUser () { return this.pickFriend },
-      getFriendMap () { return this.fl },
+      get pickUser() { return this.pickFriend },
+      getFriendMap() { return this.fl },
       fl: await this.getFriendMap(id),
 
       pickMember: (group_id, user_id) => this.pickMember(id, group_id, user_id),
       setrawgroup: (openid, group) => this.setrawgroup(openid, group),
       callbacks: async (group, msg, btnid) => await this.callbacks(opts.appid, group, msg, btnid),
       pickGroup: group_id => this.pickGroup(id, group_id),
-      getGroupMap () { return this.gl },
+      getGroupMap() { return this.gl },
       gl: await this.getGroupMap(id),
       gml: await this.getMemberMap(id),
       btneventid,
@@ -1453,24 +1454,56 @@ const adapter = new class QQBotAdapter {
       }
     }
 
-    await Bot[id].login()
+    try {
+      if (token[4] === "2") {
+        await Bot[id].sdk.sessionManager.getAccessToken()
+        Bot[id].login = () => this.appid[opts.appid] = Bot[id]
+        Bot[id].logout = () => delete this.appid[opts.appid]
+      }
+
+      await Bot[id].login()
+      Object.assign(Bot[id].info, await Bot[id].sdk.getSelfInfo())
+    } catch (err) {
+      Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)
+      return false
+    }
     await Bot[id].dau.init()
 
     Bot[id].sdk.on('message', event => this.makeMessage(id, event))
     Bot[id].sdk.on('notice', event => this.makeNotice(id, event))
 
-    Bot.makeLog('mark', `${this.name}(${this.id}) ${this.version} 已连接`, id)
+    Bot.makeLog("mark", `${this.name}(${this.id}) ${this.version} ${Bot[id].nickname} 已连接`, id)
     Bot.em(`connect.${id}`, { self_id: id })
     return true
   }
 
-  async load () {
-    for (const token of config.token) {
-      await new Promise(resolve => {
-        adapter.connect(token).then(resolve)
-        setTimeout(resolve, 5000)
-      })
-    }
+  async makeWebHookSign(req, secret) {
+    const { sign } = (await import("tweetnacl")).default
+    const { plain_token, event_ts } = req.body.d
+    while (secret.length < 32)
+      secret = secret.repeat(2).slice(0, 32)
+    const signature = Buffer.from(sign.detached(
+      Buffer.from(`${event_ts}${plain_token}`),
+      sign.keyPair.fromSeed(Buffer.from(secret)).secretKey,
+    )).toString("hex")
+    req.res.send({ plain_token, signature })
+  }
+
+  makeWebHook(req) {
+    const appid = req.headers["x-bot-appid"]
+    if (!(appid in this.appid))
+      return Bot.makeLog("warn", "找不到对应Bot", appid)
+    if ("plain_token" in req.body?.d)
+      return this.makeWebHookSign(req, this.appid[appid].info.secret)
+    if ("t" in req.body)
+      this.appid[appid].sdk.dispatchEvent(req.body.t, req.body)
+    req.res.sendStatus(200)
+  }
+
+  async load() {
+    Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
+    for (const token of config.token)
+      await Bot.sleep(5000, this.connect(token))
   }
 }()
 
@@ -1486,64 +1519,64 @@ const setMap = {
 }
 
 export class QQBotAdapter extends plugin {
-  constructor () {
+  constructor() {
     super({
       name: 'QQBotAdapter',
       dsc: 'QQBot 适配器设置',
       event: 'message',
       rule: [
         {
-          reg: /^#q+bot(帮助|help)$/i,
+          reg: /^#[Qq]+[Bb]ot(帮助|help)$/i,
           fnc: 'help',
           permission: config.permission
         },
         {
-          reg: /^#q+bot账号$/i,
+          reg: /^#[Qq]+[Bb]ot账号$/i,
           fnc: 'List',
           permission: config.permission
         },
         {
-          reg: /^#q+bot设置[0-9]+:[0-9]+:.+:.+:[01]:[01]$/i,
+          reg: /^#[Qq]+[Bb]ot设置[0-9]+:[0-9]+:.+:.+:([01]:[01]|2)$/i,
           fnc: 'Token',
           permission: config.permission
         },
         {
-          reg: /^#q+botm(ark)?d(own)?[0-9]+:/i,
+          reg: /^#[Qq]+[Bb]ot[Mm](ark)?[Dd](own)?[0-9]+:/i,
           fnc: 'Markdown',
           permission: config.permission
         },
         {
-          reg: new RegExp(`^#q+bot设置(${Object.keys(setMap).join('|')})\\s*(开启|关闭)$`, 'i'),
+          reg: new RegExp(`^#[Qq]+[Bb]ot设置(${Object.keys(setMap).join('|')})\\s*(开启|关闭)$`, 'i'),
           fnc: 'Setting',
           permission: config.permission
         },
         {
-          reg: /^#q+botdau/i,
+          reg: /^#[Qq]+[Bb]ot[Dd][Aa][Uu]/i,
           fnc: 'DAUStat',
           permission: config.permission
         },
         {
-          reg: /^#q+bot调用统计$/i,
+          reg: /^#[Qq]+[Bb]ot调用统计$/i,
           fnc: 'callStat',
           permission: config.permission
         },
         {
-          reg: /^#q+bot用户统计$/i,
+          reg: /^#[Qq]+[Bb]ot用户统计$/i,
           fnc: 'userStat',
           permission: config.permission
         },
         {
-          reg: /^#q+bot刷新co?n?fi?g$/i,
+          reg: /^#[Qq]+[Bb]ot刷新co?n?fi?g$/i,
           fnc: 'refConfig',
           permission: config.permission
         },
         {
-          reg: /^#q+bot(添加|删除)过滤日志/i,
+          reg: /^#[Qq]+[Bb]ot(添加|删除)过滤日志/i,
           fnc: 'filterLog',
           permission: config.permission
         },
         {
-          reg: /^#q+bot一键群发$/i,
+          reg: /^#[Qq]+[Bb]ot一键群发$/i,
           fnc: 'oneKeySendGroupMsg',
           permission: config.permission
         }
@@ -1551,28 +1584,28 @@ export class QQBotAdapter extends plugin {
     })
   }
 
-  help () {
+  help() {
     this.reply([
-    '#QQBotdau',
-    '#QQBotdaupro', 
-    '#QQBot调用统计',
-    '#QQBot用户统计',
-    `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}`,
-    `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}`,
-    `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}` 
+      '#QQBotdau',
+      '#QQBotdaupro',
+      '#QQBot调用统计',
+      '#QQBot用户统计',
+      `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}`,
+      `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}`,
+      `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}`
     ].join('\n'))
   }
 
-  refConfig () {
+  refConfig() {
     refConfig()
   }
 
-  List () {
+  List() {
     this.reply(`共${config.token.length}个账号：\n${config.token.join('\n')}`, true)
   }
 
-  async Token () {
-    const token = this.e.msg.replace(/^#q+bot设置/i, '').trim()
+  async Token() {
+    const token = this.e.msg.replace(/^#[Qq]+[Bb]ot设置/i, '').trim()
     if (config.token.includes(token)) {
       config.token = config.token.filter(item => item != token)
       this.reply(`账号已删除，重启后生效，共${config.token.length}个账号`, true)
@@ -1588,8 +1621,8 @@ export class QQBotAdapter extends plugin {
     await configSave()
   }
 
-  async Markdown () {
-    let token = this.e.msg.replace(/^#q+botm(ark)?d(own)?/i, '').trim().split(':')
+  async Markdown() {
+    let token = this.e.msg.replace(/^#[Qq]+[Bb]ot[Mm](ark)?[Dd](own)?/i, '').trim().split(':')
     const bot_id = token.shift()
     token = token.join(':')
     this.reply(`Bot ${bot_id} Markdown 模板已设置为 ${token}`, true)
@@ -1597,8 +1630,8 @@ export class QQBotAdapter extends plugin {
     await configSave()
   }
 
-  async Setting () {
-    const reg = /^#q+bot设置(.+)\s*(开启|关闭)$/i
+  async Setting() {
+    const reg = /^#[Qq]+[Bb]ot设置(.+)\s*(开启|关闭)$/i
     const regRet = reg.exec(this.e.msg)
     const state = regRet[2] == '开启'
     config[setMap[regRet[1]]] = state
@@ -1606,16 +1639,16 @@ export class QQBotAdapter extends plugin {
     await configSave()
   }
 
-  async DAUStat () {
+  async DAUStat() {
     const pro = this.e.msg.includes('pro')
-    const uin = this.e.msg.replace(/^#q+botdau(pro)?/i, '') || this.e.self_id
+    const uin = this.e.msg.replace(/^#[Qq]+[Bb]ot[Dd][Aa][Uu]([Pp]ro)?/i, '') || this.e.self_id
     const dau = Bot[uin]?.dau
     if (!dau || !dau.dauDB) return false
     const msg = await dau.getDauStatsMsg(this.e, pro)
     if (msg.length) this.reply(msg, true)
   }
 
-  async callStat () {
+  async callStat() {
     if (!config.callStats) return false
     const dau = this.e.bot.dau
     if (!dau || !dau.dauDB) return false
@@ -1623,7 +1656,7 @@ export class QQBotAdapter extends plugin {
     if (msg.length) this.reply(msg, true)
   }
 
-  async userStat () {
+  async userStat() {
     if (!config.userStats) return false
     const dau = this.e.bot.dau
     if (!dau || !dau.dauDB) return false
@@ -1635,8 +1668,8 @@ export class QQBotAdapter extends plugin {
   }
 
   // 自欺欺人大法
-  async filterLog () {
-    const match = /^#q+bot(添加|删除)过滤日志(.*)/i.exec(this.e.msg)
+  async filterLog() {
+    const match = /^#[Qq]+[Bb]ot(添加|删除)过滤日志(.*)/i.exec(this.e.msg)
     let msg = _.trim(match[2]) || ''
     if (!msg) return false
 
@@ -1658,7 +1691,7 @@ export class QQBotAdapter extends plugin {
     this.reply(msg, true)
   }
 
-  async oneKeySendGroupMsg () {
+  async oneKeySendGroupMsg() {
     if (this.e.adapter_name !== 'QQBot') return false
     const msg = await importJS('Model/template/oneKeySendGroupMsg.js', 'default')
     if (msg === false) {

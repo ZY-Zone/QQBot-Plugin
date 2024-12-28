@@ -4,7 +4,8 @@
   "author": "TimeRainStarSky",
   "dependencies": {
     "qq-official-bot": "link:Model/qq-official-bot",
-    "qrcode": "^1.5.3",
-    "silk-wasm": "^3.3.3"
+    "tweetnacl": "^1.0.3",
+    "qrcode": "^1.5.4",
+    "silk-wasm": "^3.6.1",
   }
 }

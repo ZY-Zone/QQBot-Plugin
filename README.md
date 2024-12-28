@@ -125,8 +125,17 @@ TRSS-Yunzai QQBot 适配器 插件
 #QQBot设置114:514:1919:810:1:1
 ```
 
+- WebHook
+
+```
+#QQBot设置114:514:1919:810:2
+```
+
+需要启用公网 HTTPS，开放平台添加 {url}/QQBot  
+
 ## 使用教程
 
 - #QQBot账号
 - #QQBot设置 + `机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域`（是1 否0）
 - #QQBotMD + `机器人QQ号:模板ID`
+- #QQBotMD + `机器人QQ号:raw`（需要原生MD按钮权限）
