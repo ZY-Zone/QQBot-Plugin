@@ -1055,7 +1055,10 @@ const adapter = new class QQBotAdapter {
 
   async makeFriendMessage(data, event) {
     data.sender = {
-      user_id: `${data.self_id}${this.sep}${event.sender.user_id}`
+      user_id: `${data.self_id}${this.sep}${event.sender.user_id}`,
+      raw_user_id: event.sender.user_id,
+      nickname: `${data.self_id}_${event.sender.user_id}`,
+      avatar: `https://q.qlogo.cn/qqapp/${data.bot.info.appid}/${event.sender.user_id}/0`
     }
     Bot.makeLog('info', `好友消息：[${data.user_id}] ${data.raw_message}`, data.self_id)
     data.reply = msg => this.sendFriendMsg({
@@ -1066,7 +1069,10 @@ const adapter = new class QQBotAdapter {
 
   async makeGroupMessage(data, event) {
     data.sender = {
-      user_id: `${data.self_id}${this.sep}${event.sender.user_id}`
+      user_id: `${data.self_id}${this.sep}${event.sender.user_id}`,
+      raw_user_id: event.sender.user_id,
+      nickname: `${data.self_id}_${event.sender.user_id}`,
+      avatar: `https://q.qlogo.cn/qqapp/${data.bot.info.appid}/${event.sender.user_id}/0`
     }
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
