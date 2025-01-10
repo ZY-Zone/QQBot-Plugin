@@ -768,18 +768,20 @@ const adapter = new class QQBotAdapter {
         return res
       }
     }
-    if (config.callbacks.open && btneventid[`group_${data.group_id}`]) {
-      event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-    } else if (config.callbacks.open && this.rawgroup[data.group_id]) {
-      await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
-      let i = 0
-      while (i < 10) {
-        if (btneventid[`group_${data.group_id}`]) {
-          event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-          break
+    if (config.callbacks.open) {
+      if (btneventid[`group_${data.group_id}`]) {
+        event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+      } else if (this.rawgroup[data.group_id]) {
+        await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
+        let i = 0
+        while (i < 10) {
+          if (btneventid[`group_${data.group_id}`]) {
+            event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
+            break
+          }
+          i++
+          await new Promise(resolve => setTimeout(resolve, 500))
         }
-        i++
-        await new Promise(resolve => setTimeout(resolve, 500))
       }
     }
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
