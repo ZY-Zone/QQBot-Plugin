@@ -10,12 +10,18 @@ TRSS-Yunzai QQBot 适配器 插件
 
 建议使用TRSS原版,此版本为`小叶Fork个人自用`版的`修改版`,会在`任意时间`直接进行更改,且`不会`与TRSS一致  
 可使用自定义ws连接其他人搭建的webhook-to-websocket服务，从而实现无缝切换webhook  
-可自行搭建服务（需要有一定知识基础，进群有Python转发端例子）  
 班级群： [687976465](https://qm.qq.com/q/PCWuy2zV6u)
+<details><summary>自己部署webhook转发服务</summary>  
+
+- Python后端（Linux推荐）：[qbot-webhook-to-websocket](https://github.com/DevOpen-Club/qbot-webhook-to-websocket)
+- Node.js后端（Windows推荐-TS霆生のwebhook转发服务同款👍）：[Node.js-qbot-webhook-to-websocket（Gitee）](https://gitee.com/ts-yf/Node.js-qbot-webhook-to-websocket) | [Node.js-qbot-webhook-to-websocket（Github）](https://github.com/Ts-yf/Node.js-qbot-webhook-to-websocket)
+
+</details>
+
 <details><summary>使用TS霆生のwebhook转发服务（免费）</summary>  
 
 ## 为了防止滥用，此功能需要进群联系管理员授权服务。  
-1. QQ机器人后台回调配置链接：`https://ts.elaina.vin/webhook?secret={secret}`，`{secret}`替换为`bot secret`，配置回调链接不用，未授权的secret将不会推送消息给ws
+1. QQ机器人后台回调配置链接：`https://ts.elaina.vin/webhook?secret={secret}`，`{secret}`替换为`bot secret`，配置回调链接不用授权，未授权的secret将不会推送消息给ws
 2. 插件ws连接配置：`ws://ts.elaina.vin:8000/ws/{secret}`，`{secret}`替换为`bot secret`  
 > 感谢`冷曦·Elaine`提供的域名服务  
 </details>
@@ -23,7 +29,7 @@ TRSS-Yunzai QQBot 适配器 插件
 
 ## 自用Fork版
 
-0. 自定义ws接收地址，在`config/QQBot.yaml`中添加以下配置项
+0. 自定义ws接收地址，在`config/QQBot.yaml`中添加以下配置项，`BotQQ`改为`机器人QQ号`
    ```yml
    WsUrl:
      BotQQ: ws://...
@@ -95,17 +101,10 @@ TRSS-Yunzai QQBot 适配器 插件
         # ...
     ```
 11. `config/QQBot.yaml`中`simplifiedSdkLog`是否简化sdk日志,若设置为`true`则不会打印` recv from Group(xxx):  xxx`,并且会简化发送为`send to Group(xxx): <markdown><button>`
-12. ~~`#QQBot一键群发`: 需要先配置模版 `template/oneKeySendGroupMsg_default.js`~~
+12. `#QQBot一键群发`: 需要先配置模版 `template/oneKeySendGroupMsg_default.js`
 13. `config/QQBot.yaml`中`markdownImgScale: 1`是否对markdown中的图片进行等比例缩放,0.5为缩小50%,1.5为放大50%,以此类推
 14. `config/QQBot.yaml`中`sendButton: true`未开启全局MD时是否单独发送按钮
-15. `config/QQBot.yaml`中`dauDB: level`选择存储dau数据的数据库,可选: `level`, `redis`,以及`false`关闭dau统计(仅每日发言用户和群)
-    - `level`
-      - 优点: 统计了大部分数据
-      - 缺点: 缓存存一份,level存一份
-    - `redis`
-      - 优点: 大部分使用redis存储,不会缓存
-      - 缺点: 没有缓存所以有些没统计
-16. 已适配YePanel,提供dau统计和设置功能
+15. 已适配YePanel,提供dau统计和设置功能
 
 ## 安装教程
 

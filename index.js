@@ -768,7 +768,7 @@ const adapter = new class QQBotAdapter {
         return res
       }
     }
-    if (btneventid[`group_${data.group_id}`]) {
+    if (config.callbacks.open && btneventid[`group_${data.group_id}`]) {
       event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
     } else if (config.callbacks.open && this.rawgroup[data.group_id]) {
       await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
@@ -1497,11 +1497,11 @@ const adapter = new class QQBotAdapter {
 
   makeWebHook(req) {
     const appid = req.headers["x-bot-appid"]
-    if (!(appid in this.appid))
+    if (!this.appid.hasOwnProperty(appid))
       return Bot.makeLog("warn", "找不到对应Bot", appid)
-    if ("plain_token" in req.body?.d)
+    if (req.body?.d.hasOwnProperty("plain_token"))
       return this.makeWebHookSign(req, this.appid[appid].info.secret)
-    if ("t" in req.body)
+    if (req.body.hasOwnProperty('t'))
       this.appid[appid].sdk.dispatchEvent(req.body.t, req.body)
     req.res.sendStatus(200)
   }
