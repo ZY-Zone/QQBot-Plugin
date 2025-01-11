@@ -1241,7 +1241,7 @@ const adapter = new class QQBotAdapter {
       bot: Bot[id],
       self_id: id,
       post_type: 'message',
-      message_id: event.event_id ? `event_${event.event_id}` : event.notice_id,
+      message_id: event.event_id || event.notice_id,
       message_type: event.notice_type,
       sub_type: 'callback',
       get user_id() { return this.sender.user_id },
