@@ -1338,6 +1338,7 @@ const adapter = new class QQBotAdapter {
             })
           }
         }
+        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { event_id: event.event_id })
         Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
         return
       case 'decrease':
