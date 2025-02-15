@@ -5,6 +5,7 @@ import fs from 'node:fs'
 let { config, configSave } = await makeConfig('QQBot', {
   tips: '',
   WsUrl: { 114514: 'ws://...' },
+  ApiUrl: { 114514: 'http://...' },
   permission: 'master',
   dauDB: 'redis',
   toQRCode: true,
@@ -16,8 +17,8 @@ let { config, configSave } = await makeConfig('QQBot', {
   callStats: false,
   userStats: false,
   callbacks: {
-    open: true,
-    url: 'http://yue1314.asia/callback',
+    open: false,
+    url: 'https://tsyfun.eu.org/callback',
     appid: 'appid',
     group: 'group',
     msg: 'msg',

@@ -40,8 +40,17 @@ class QQBot extends events_1.EventEmitter {
         super();
         this.config = config;
         this.sessionManager = new sessionManager_1.SessionManager(this);
+        this.baseUrl = `${((config) => {
+          if (config?.ApiUrl?.startsWith('http')) {
+             return config.ApiUrl
+          } else if (config?.sendbox) {
+             return 'https://sandbox.api.sgroup.qq.com'
+          } else {
+             return 'https://api.sgroup.qq.com'
+          }
+        })(config)}`;
         this.request = axios_1.default.create({
-            baseURL: this.config.sandbox ? 'https://sandbox.api.sgroup.qq.com' : `https://api.sgroup.qq.com`,
+            baseURL: this.baseUrl,
             timeout: config.timeout || 5000,
             headers: {
                 'User-Agent': `BotNodeSDK/0.0.1`

@@ -1379,6 +1379,7 @@ const adapter = new class QQBotAdapter {
     const opts = {
       ...config.bot,
       WsUrl: config?.WsUrl[id] || '',
+      ApiUrl: config?.ApiUrl[id] || '',
       appid: token[1],
       token: token[2],
       secret: token[3],
