@@ -69,6 +69,8 @@ async function getBase64FromWeb(url) {
 }
 exports.getBase64FromWeb = getBase64FromWeb;
 function getFileBase64(file) {
+    if (file instanceof Uint8Array)
+        return Buffer.from(file).toString('base64');
     if (Buffer.isBuffer(file))
         return file.toString('base64');
     if (file.startsWith('http'))

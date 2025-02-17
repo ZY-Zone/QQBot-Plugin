@@ -51,13 +51,12 @@ const adapter = new class QQBotAdapter {
     try {
       fs.writeFileSync(convFile, buffer)
       await Bot.exec(`ffmpeg -i "${convFile}" -f s16le -ar 48000 -ac 1 "${convFile}.pcm"`)
-      await Bot.exec(`silk_v3_encoder "${convFile}.pcm" "${convFile}.silk" -Fs_API 48000 -rate 48000 -tencent`)
-      file = fs.readFileSync(`${convFile}.silk`)
+      file = (await encodeSilk(fs.readFileSync(`${convFile}.pcm`), 48000)).data
     } catch (err) {
       Bot.makeLog("error", ["silk 转码错误", file, err])
     }
 
-    for (const i of [convFile, `${convFile}.pcm`, `${convFile}.silk`]) {
+    for (const i of [convFile, `${convFile}.pcm`]) {
       try {
         fs.unlinkSync(i)
       } catch (err) { }
