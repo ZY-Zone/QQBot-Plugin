@@ -43,6 +43,15 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeRecord(file) {
+    if (config.toBotUpload) for (const i of Bot.uin) {
+      if (!Bot[i].uploadRecord) continue
+      try {
+        const url = await Bot[i].uploadRecord(file)
+        if (url) return url
+      } catch (err) {
+        Bot.makeLog("error", ["Bot", i, "语音上传错误", file, err])
+      }
+    }
     const buffer = await Bot.Buffer(file)
     if (!Buffer.isBuffer(buffer)) return file
     if (isSilk(buffer)) return buffer
