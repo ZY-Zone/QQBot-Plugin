@@ -173,7 +173,7 @@ const adapter = new class QQBotAdapter {
         if (!Array.isArray(data._ret_id)) data._ret_id = []
 
         data.bot.callback[msg.id] = {
-          id: data.message_id,
+          id: `event_${data?.raw?.event_id}` || data?.message_id,
           user_id: data.user_id,
           group_id: data.group_id,
           message: button.callback,
