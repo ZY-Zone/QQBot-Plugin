@@ -960,7 +960,7 @@ const adapter = new class QQBotAdapter {
 
   pickFriend(id, user_id) {
     if (config.toQQUin && userIdCache[user_id]) user_id = userIdCache[user_id]
-    if (user_id.startsWith('qg_')) return this.pickGuildFriend(id, user_id)
+    if (user_id?.startsWith('qg_')) return this.pickGuildFriend(id, user_id)
 
     const i = {
       ...Bot[id].fl.get(user_id),
@@ -980,7 +980,7 @@ const adapter = new class QQBotAdapter {
     if (config.toQQUin && userIdCache[user_id]) {
       user_id = userIdCache[user_id]
     }
-    if (user_id.startsWith('qg_')) { return this.pickGuildMember(id, group_id, user_id) }
+    if (user_id?.startsWith('qg_')) { return this.pickGuildMember(id, group_id, user_id) }
     const i = {
       ...Bot[id].fl.get(user_id),
       ...Bot[id].gml.get(group_id)?.get(user_id),
@@ -996,7 +996,7 @@ const adapter = new class QQBotAdapter {
   }
 
   pickGroup(id, group_id) {
-    if (group_id.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
+    if (group_id?.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
     const i = {
       ...Bot[id].gl.get(group_id),
       self_id: id,
