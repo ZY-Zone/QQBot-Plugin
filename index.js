@@ -33,6 +33,8 @@ const adapter = new class QQBotAdapter {
 
     if (typeof config.toQRCode == 'boolean') {
       this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
+    } else if (config.toQRCode == 'url') {
+      this.toQRCodeRegExp = false
     } else {
       this.toQRCodeRegExp = new RegExp(config.toQRCode, 'g')
     }
@@ -87,6 +89,22 @@ const adapter = new class QQBotAdapter {
   setrawgroup(openid, group) {
     this.rawgroup[openid] = group
     return this.rawgroup[openid]
+  }
+
+  convertURL(url) {
+    if (url == null) return '';
+    const urlStr = String(url);
+    const parts = urlStr.split('://');
+    if (parts.length === 1) return urlStr.toUpperCase();
+    const protocol = parts[0].toLowerCase();
+    const rest = parts.slice(1).join('://');
+    const [hostPart, remaining = ''] = rest.split(/[/?#]/);
+    const separatorIndex = rest.indexOf(hostPart) + hostPart.length;
+    return (
+      protocol + '://' +
+      hostPart.toUpperCase() +
+      rest.slice(separatorIndex)
+    );
   }
 
   async makeQRCode(data) {
@@ -657,6 +675,13 @@ const adapter = new class QQBotAdapter {
             message.push(msg)
             i.text = i.text.replace(url, '[链接(请扫码查看)]')
           }
+        } else if (config.toQRCode == 'url') {
+          const match = i.text.match(/(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g)
+          if (match) {
+            for (const url of match) {
+              i.text = i.text.replace(url, this.convertURL(url))
+            }
+          }
         }
       }
 
@@ -856,6 +881,13 @@ const adapter = new class QQBotAdapter {
             messages.push(message)
             message = []
             i.text = i.text.replace(url, '[链接(请扫码查看)]')
+          }
+        } else if (config.toQRCode == 'url') {
+          const match = i.text.match(/(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g)
+          if (match) {
+            for (const url of match) {
+              i.text = i.text.replace(url, this.convertURL(url))
+            }
           }
         }
       }
