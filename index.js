@@ -23,13 +23,19 @@ const userIdCache = {}
 var btneventid = {}
 const markdown_template = await importJS('Model/template/markdownTemplate.js', 'default')
 const TmplPkg = await importJS('templates/index.js')
+let sharp
+if (config.imageLength) try {
+  sharp = (await import("sharp")).default
+} catch (err) {
+  Bot.makeLog("error", ["sharp 导入错误，图片压缩关闭", err], "QQBot-Plugin")
+}
 
 const adapter = new class QQBotAdapter {
   constructor() {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
-    this.version = 'qq-official-bot v11.45.14'
+    this.version = 'qq-official-bot v25.04.28'
 
     if (typeof config.toQRCode == 'boolean') {
       this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
@@ -78,7 +84,7 @@ const adapter = new class QQBotAdapter {
   async callbacks(appid, group, msg = 'TS_callback', id = '5201314') {
     try {
       const res = await (await fetch(`${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`)).text();
-      logger.info(`request：${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`, res);
+      logger.debug(`request：${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`, res);
       return res
     } catch (err) {
       logger.error(`callbacks请求失败：${err}`);
@@ -265,9 +271,7 @@ const adapter = new class QQBotAdapter {
           messages.push([i])
           break
         case 'file':
-          if (i.file) i.file = await Bot.fileToUrl(i.file, i.type)
-          content += await this.makeRawMarkdownText(data, `文件：${i.file}`, button)
-          break
+          return []
         case 'at':
           if (i.qq == 'all') { content += '@everyone' } else { content += `<@${i.qq?.replace?.(`${data.self_id}${this.sep}`, '')}>` }
           break
@@ -422,10 +426,7 @@ const adapter = new class QQBotAdapter {
           messages.push([i])
           break
         case 'file':
-          if (i.file) i.file = await Bot.fileToUrl(i.file, i, i.type)
-          button.push(...this.makeButtons(data, [[{ text: i.name || i.file, link: i.file }]]))
-          content += '[文件(请点击按钮查看)]'
-          break
+          return []
         case 'at':
           if (i.qq == 'all') content += '@everyone'
           else {
@@ -580,6 +581,30 @@ const adapter = new class QQBotAdapter {
     }
     return messages
   }
+  async compressImage(data, file) {
+    try {
+      const size = config.imageLength * 1024 * 1024
+      const buffer = await Bot.Buffer(file, { http: true })
+
+      if (!Buffer.isBuffer(buffer))
+        return file
+
+      if (buffer.length <= size)
+        return buffer
+
+      let quality = 105, output
+      do {
+        quality -= 10
+        output = await sharp(buffer).jpeg({ quality }).toBuffer()
+        Bot.makeLog("debug", `图片压缩完成 ${quality}%(${(output.length / 1024).toFixed(2)}KB)`, data.self_id)
+      } while (output.length > size && quality > 10)
+
+      return output
+    } catch (err) {
+      Bot.makeLog("error", ["图片压缩错误", err], data.self_id)
+      return file
+    }
+  }
 
   async makeMsg(data, msg) {
     const sendType = ['audio', 'image', 'video', 'file']
@@ -593,12 +618,10 @@ const adapter = new class QQBotAdapter {
 
       switch (i.type) {
         case 'at':
-          // if (config.toQQUin && userIdCache[user_id]) {
-          //   i.qq = userIdCache[user_id]
-          // }
-          // i.qq = i.qq?.replace?.(`${data.self_id}${this.sep}`, "")
           continue
         case 'text':
+          if (!i.text || !i.text.trim()) continue
+          break
         case 'face':
         case 'ark':
         case 'embed':
@@ -612,11 +635,11 @@ const adapter = new class QQBotAdapter {
             messages.push(message)
             message = []
           }
+          if (sharp && i.file)
+            i.file = await this.compressImage(data, i.file)
           break
         case 'file':
-          if (i.file) i.file = await Bot.fileToUrl(i.file, i, i.type)
-          i = { type: 'text', text: `文件：${i.file}` }
-          break
+          return []
         case 'reply':
           if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
@@ -843,9 +866,7 @@ const adapter = new class QQBotAdapter {
         case 'record':
         case 'video':
         case 'file':
-          if (i.file) i.file = await Bot.fileToUrl(i.file, i)
-          i = { type: 'text', text: `文件：${i.file}` }
-          break
+          return []
         case 'reply':
           if (i?.id?.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }

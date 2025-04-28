@@ -6,6 +6,7 @@
     "qq-official-bot": "link:Model/qq-official-bot",
     "tweetnacl": "^1.0.3",
     "qrcode": "^1.5.4",
-    "silk-wasm": "^3.6.1"
+    "silk-wasm": "^3.6.1",
+    "sharp": "^0.33.5"
   }
 }
