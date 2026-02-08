@@ -162,6 +162,23 @@ const adapter = new class QQBotAdapter {
     image.width = Math.floor(image.width * config.markdownImgScale)
     image.height = Math.floor(image.height * config.markdownImgScale)
 
+    if (Handler.has('QQBot.makeMarkdownImage')) {
+      const res = await Handler.call(
+        'QQBot.makeMarkdownImage',
+        data,
+        {
+          image,
+          buffer,
+          file,
+          summary,
+          config
+        }
+      )
+      if (res) {
+        typeof res == 'object' ? Object.assign(image, res) : image.url = res
+      }
+    }
+
     return {
       des: `![${summary} #${image.width || 0}px #${image.height || 0}px]`,
       url: `(${image.url})`
@@ -181,43 +198,66 @@ const adapter = new class QQBotAdapter {
 
     if (button.input) {
       msg.action = {
-        type: 2,
+        type: button.type ?? 2,
         permission: { type: 2 },
         data: button.input,
         enter: button.send,
+        reply: button.reply ?? false,
+        anchor: button.anchor ?? 0,
+        click_limit: button.click_limit ?? undefined,
+        at_bot_show_channel_list: button.at_bot_show_channel_list ?? false,
+        unsupport_tips: button.unsupport_tips || '当前客户端不支持此操作',
         ...button.QQBot?.action
       }
     } else if (button.callback) {
-      if (config.toCallback) {
+      // 修改这里，对type=1的按钮也使用服务端回调机制
+      if (config.toCallback || button.type === 1) {
         msg.action = {
-          type: 1,
+          type: button.type ?? 1,
           permission: { type: 2 },
+          reply: button.reply ?? false,
+          enter: button.enter ?? false,
+          anchor: button.anchor ?? 0,
+          click_limit: button.click_limit ?? undefined,
+          at_bot_show_channel_list: button.at_bot_show_channel_list ?? false,
+          unsupport_tips: button.unsupport_tips || '当前客户端不支持此操作',
           ...button.QQBot?.action
         }
         if (!Array.isArray(data._ret_id)) data._ret_id = []
 
         data.bot.callback[msg.id] = {
-          id: `event_${data?.raw?.event_id}` || data?.message_id,
+          id: data.message_id,
           user_id: data.user_id,
           group_id: data.group_id,
           message: button.callback,
           message_id: data._ret_id
         }
-        setTimeout(() => delete data.bot.callback[msg.id], 300000)
+        // setTimeout(() => delete data.bot.callback[msg.id], 300000)
       } else {
         msg.action = {
-          type: 2,
+          type: button.type ?? 2,
           permission: { type: 2 },
           data: button.callback,
           enter: true,
+          reply: button.reply ?? false,
+          anchor: button.anchor ?? 0,
+          click_limit: button.click_limit ?? undefined,
+          at_bot_show_channel_list: button.at_bot_show_channel_list ?? false,
+          unsupport_tips: button.unsupport_tips || '当前客户端不支持此操作',
           ...button.QQBot?.action
         }
       }
     } else if (button.link) {
       msg.action = {
-        type: 0,
+        type: button.type ?? 0,
         permission: { type: 2 },
         data: button.link,
+        reply: button.reply ?? false,
+        enter: button.enter ?? false,
+        anchor: button.anchor ?? 0,
+        click_limit: button.click_limit ?? undefined,
+        at_bot_show_channel_list: button.at_bot_show_channel_list ?? false,
+        unsupport_tips: button.unsupport_tips || '当前客户端不支持此操作',
         ...button.QQBot?.action
       }
     } else return false
@@ -283,14 +323,22 @@ const adapter = new class QQBotAdapter {
           content += `${des}${url}`
           break
         } case 'markdown':
-          if (typeof i.data == 'object') messages.push([{ type: 'markdown', ...i.data }])
+        if (typeof i.data == 'object') {
+          let markdownObj = { type: 'markdown', ...i.data }
+          // 添加对hide_avatar_and_center的支持
+          if (i.data.hide_avatar_and_center) {
+            markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
+            delete markdownObj.hide_avatar_and_center
+          }
+          messages.push([markdownObj])
+        }
           else content += i.data
           break
         case 'button':
           button.push(...this.makeButtons(data, i.data))
           break
         case 'reply':
-          if (i?.id?.startsWith('event_')) {
+          if (i.id.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -300,7 +348,24 @@ const adapter = new class QQBotAdapter {
           for (const { message } of i.data) { messages.push(...(await this.makeRawMarkdownMsg(data, message))) }
           continue
         case 'raw':
-          messages.push(Array.isArray(i.data) ? i.data : [i.data])
+          // 对于raw类型的消息，直接添加到当前消息组中，而不是创建新的消息组
+          if (Array.isArray(i.data)) {
+            // 如果是数组，将每个元素添加到当前消息组
+            for (const rawItem of i.data) {
+              if (messages.length === 0) {
+                messages.push([rawItem])
+              } else {
+                messages[messages.length - 1].push(rawItem)
+              }
+            }
+          } else {
+            // 如果是单个对象，添加到当前消息组
+            if (messages.length === 0) {
+              messages.push([i.data])
+            } else {
+              messages[messages.length - 1].push(i.data)
+            }
+          }
           break
         default:
           content += await this.makeRawMarkdownText(data, JSON.stringify(i), button)
@@ -504,21 +569,46 @@ const adapter = new class QQBotAdapter {
           content = url
           break
         } case 'markdown':
-          if (typeof i.data == 'object') messages.push([{ type: 'markdown', ...i.data }])
-          else content += i.data
+        if (typeof i.data == 'object') {
+          let markdownObj = { type: 'markdown', ...i.data }
+          // 添加对hide_avatar_and_center的支持
+          if (i.data.hide_avatar_and_center) {
+            markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
+            delete markdownObj.hide_avatar_and_center
+          }
+          messages.push([markdownObj])
+        }
+        else content += i.data
           break
         case 'button':
           button.push(...this.makeButtons(data, i.data))
           break
         case 'reply':
-          if (i?.id?.startsWith('event_')) {
+          if (i.id.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
           }
           continue
         case 'raw':
-          messages.push(Array.isArray(i.data) ? i.data : [i.data])
+          // 对于raw类型的消息，直接添加到当前消息组中，而不是创建新的消息组
+          if (Array.isArray(i.data)) {
+            // 如果是数组，将每个元素添加到当前消息组
+            for (const rawItem of i.data) {
+              if (messages.length === 0) {
+                messages.push([rawItem])
+              } else {
+                messages[messages.length - 1].push(rawItem)
+              }
+            }
+          } else {
+            // 如果是单个对象，添加到当前消息组
+            if (messages.length === 0) {
+              messages.push([i.data])
+            } else {
+              messages[messages.length - 1].push(i.data)
+            }
+          }
           break
         case 'custom':
           template.push(...i.data)
@@ -610,6 +700,15 @@ const adapter = new class QQBotAdapter {
     const sendType = ['audio', 'image', 'video', 'file']
     const messages = []
     const button = []
+    // 添加全局按钮
+    const botId = data?.self_id?.toString()
+    if (botId && config.keyboard && config.keyboard[botId]) {
+      // 使用用户指定的按钮格式
+      messages.push([{
+        type: 'keyboard',
+        id: config.keyboard[botId]
+      }])
+    }
     let message = []
     let reply
 
@@ -641,7 +740,7 @@ const adapter = new class QQBotAdapter {
         case 'file':
           return []
         case 'reply':
-          if (i?.id?.startsWith('event_')) {
+          if (i.id.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -679,8 +778,10 @@ const adapter = new class QQBotAdapter {
           if (Array.isArray(i.data)) {
             messages.push(i.data)
             continue
+          } else {
+            // 对于单个raw对象，将其作为普通消息处理
+            i = i.data
           }
-          i = i.data
           break
         default:
           i = { type: 'text', text: JSON.stringify(i) }
@@ -776,7 +877,13 @@ const adapter = new class QQBotAdapter {
       }
     }
 
-    if ((config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) && data.toQQBotMD !== false) {
+      // 检查是否包含raw类型的消息，如果包含则使用makeRawMarkdownMsg处理
+      const hasRawMessage = Array.isArray(msg) ? msg.some(m => m.type === 'raw') : msg.type === 'raw'
+  
+      if (hasRawMessage) {
+        // 对于包含raw消息的情况，使用makeRawMarkdownMsg处理，确保markdown和按钮在同一消息中
+        msgs = await this.makeRawMarkdownMsg(data, msg)
+      } else if ((config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) && data.toQQBotMD !== false) {
       if (config.markdown[data.self_id] == 'raw') msgs = await this.makeRawMarkdownMsg(data, msg)
       else msgs = await this.makeMarkdownMsg(data, msg)
 
@@ -793,10 +900,12 @@ const adapter = new class QQBotAdapter {
       msgs = await this.makeMsg(data, msg)
     }
 
-    if (await sendMsg() === false) {
-      msgs = await this.makeMsg(data, msg)
-      await sendMsg()
-    }
+    // if (await sendMsg() === false) {
+    //   msgs = await this.makeMsg(data, msg)
+    //   await sendMsg()
+    // }
+    // 只尝试发送一次，避免重复发送
+    await sendMsg()
 
     if (Array.isArray(data._ret_id)) { data._ret_id.push(...rets.message_id) }
     return rets
@@ -847,6 +956,7 @@ const adapter = new class QQBotAdapter {
     const messages = []
     let message = []
     let reply
+    let button = []
     for (let i of Array.isArray(msg) ? msg : [msg]) {
       if (typeof i == 'object') { i = { ...i } } else { i = { type: 'text', text: i } }
 
@@ -860,6 +970,13 @@ const adapter = new class QQBotAdapter {
           break
         case 'image':
           message.push(i)
+          if (button.length) {
+            message.push({
+              type: 'keyboard',
+              content: { rows: button }
+            })
+            button = []
+          }
           messages.push(message)
           message = []
           continue
@@ -868,7 +985,7 @@ const adapter = new class QQBotAdapter {
         case 'file':
           return []
         case 'reply':
-          if (i?.id?.startsWith('event_')) {
+          if (i.id.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
           } else {
             reply = i
@@ -878,6 +995,7 @@ const adapter = new class QQBotAdapter {
           if (typeof i.data == 'object') { i = { type: 'markdown', ...i.data } } else { i = { type: 'markdown', content: i.data } }
           break
         case 'button':
+          config.sendButton && button.push(...this.makeButtons(data, i.data))
           continue
         case 'node':
           for (const { message } of i.data) { messages.push(...(await this.makeGuildMsg(data, message))) }
@@ -899,6 +1017,13 @@ const adapter = new class QQBotAdapter {
           for (const url of match) {
             const msg = segment.image(await this.makeQRCode(url))
             message.push(msg)
+            if (button.length) {
+              message.push({
+                type: 'keyboard',
+                content: { rows: button }
+              })
+              button = []
+            }
             messages.push(message)
             message = []
             i.text = i.text.replace(url, '[链接(请扫码查看)]')
@@ -917,8 +1042,23 @@ const adapter = new class QQBotAdapter {
     }
 
     if (message.length) {
+      if (button.length) {
+        message.push({
+          type: 'keyboard',
+          content: { rows: button }
+        })
+      }
       messages.push(message)
+    } else if (button.length) {
+      messages.push([
+        { type: 'text', text: ' ' },
+        {
+          type: 'keyboard',
+          content: { rows: button }
+        }
+      ])
     }
+
     if (reply) {
       for (const i of messages) i.unshift(reply)
     }
@@ -949,10 +1089,12 @@ const adapter = new class QQBotAdapter {
     }
 
     msgs = await this.makeGuildMsg(data, msg)
-    if (await sendMsg() === false) {
-      msgs = await this.makeGuildMsg(data, msg)
-      await sendMsg()
-    }
+    // if (await sendMsg() === false) {
+    //   msgs = await this.makeGuildMsg(data, msg)
+    //   await sendMsg()
+    // }
+    // 只尝试发送一次，避免重复发送
+    await sendMsg()
     return rets
   }
 
@@ -1013,7 +1155,7 @@ const adapter = new class QQBotAdapter {
 
   pickFriend(id, user_id) {
     if (config.toQQUin && userIdCache[user_id]) user_id = userIdCache[user_id]
-    if (user_id?.startsWith('qg_')) return this.pickGuildFriend(id, user_id)
+    if (user_id.startsWith('qg_')) return this.pickGuildFriend(id, user_id)
 
     const i = {
       ...Bot[id].fl.get(user_id),
@@ -1033,7 +1175,7 @@ const adapter = new class QQBotAdapter {
     if (config.toQQUin && userIdCache[user_id]) {
       user_id = userIdCache[user_id]
     }
-    if (user_id?.startsWith('qg_')) { return this.pickGuildMember(id, group_id, user_id) }
+    if (user_id.startsWith('qg_')) { return this.pickGuildMember(id, group_id, user_id) }
     const i = {
       ...Bot[id].fl.get(user_id),
       ...Bot[id].gml.get(group_id)?.get(user_id),
@@ -1049,7 +1191,7 @@ const adapter = new class QQBotAdapter {
   }
 
   pickGroup(id, group_id) {
-    if (group_id?.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
+    if (group_id.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
     const i = {
       ...Bot[id].gl.get(group_id),
       self_id: id,
@@ -1112,7 +1254,20 @@ const adapter = new class QQBotAdapter {
       sendMsg: msg => this.sendGuildMsg(i, msg),
       recallMsg: (message_id, hide) => this.recallGuildMsg(i, message_id, hide),
       pickMember: user_id => this.pickGuildMember(id, group_id, user_id),
-      getMemberMap: () => i.bot.gml.get(group_id)
+      getMemberMap: () => i.bot.gml.get(group_id),
+      createChannel: (channelInfo) => this.createChannel(i, channelInfo)
+    }
+  }
+
+  // 创建子频道
+  async createChannel(data, channelInfo) {
+    try {
+      Bot.makeLog('info', `创建子频道：[${data.guild_id}] ${JSON.stringify(channelInfo)}`, data.self_id)
+      const result = await data.bot.sdk.createChannel(data.guild_id, channelInfo)
+      return result
+    } catch (err) {
+      Bot.makeLog('error', ['创建子频道错误', channelInfo, err], data.self_id)
+      return false
     }
   }
 
@@ -1282,7 +1437,19 @@ const adapter = new class QQBotAdapter {
         return
     }
 
-    data.bot.stat.recv_msg_cnt++
+    // 修复recv_msg_cnt的递增问题
+    try {
+      data.bot.stat.recv_msg_cnt++
+    } catch (err) {
+      // 如果直接递增失败，尝试使用赋值方式
+      try {
+        data.bot.stat.recv_msg_cnt = (data.bot.stat.recv_msg_cnt || 0) + 1
+      } catch (err2) {
+        // 忽略错误，确保程序继续运行
+        Bot.makeLog('debug', ['无法更新接收消息计数', err2], id)
+      }
+    }
+
     Bot[data.self_id].dau.setDau('receive_msg', data)
     Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
   }
@@ -1302,7 +1469,7 @@ const adapter = new class QQBotAdapter {
       bot: Bot[id],
       self_id: id,
       post_type: 'message',
-      message_id: event.event_id || event.notice_id,
+      message_id: event.notice_id || event.event_id,
       message_type: event.notice_type,
       sub_type: 'callback',
       get user_id() { return this.sender.user_id },
@@ -1341,7 +1508,7 @@ const adapter = new class QQBotAdapter {
         data.message_type = 'private'
         Bot.makeLog('info', [`好友按钮点击事件：[${data.user_id}]`, data.raw_message], data.self_id)
 
-        data.reply = msg => this.sendFriendMsg({ ...data, user_id: event.operator_id }, msg, { event_id: data.message_id })
+        data.reply = msg => this.sendFriendMsg({ ...data, user_id: event.operator_id }, msg, { id: data.message_id })
         await this.setFriendMap(data)
         break
       case 'group':
@@ -1349,7 +1516,7 @@ const adapter = new class QQBotAdapter {
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
         btneventid[`group_${event.group_id}`] = data.message_id
         setTimeout(() => delete btneventid[`group_${event.group_id}`], 300000)
-        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { event_id: data.message_id })
+        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { id: data.message_id })
         await this.setGroupMap(data)
         break
       case 'guild':
@@ -1420,6 +1587,127 @@ const adapter = new class QQBotAdapter {
     }
 
     Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
+  }
+
+  makeForumPost(id, event) {
+    const eventData = event.d || event
+    const data = {
+      raw: event,
+      bot: Bot[id],
+      self_id: id,
+      post_type: 'forum',
+      event_type: 'FORUM_POST_CREATE',
+      guild_id: eventData.guild_id,
+      channel_id: eventData.channel_id,
+      thread_id: eventData.post_info?.thread_id,
+      post_id: eventData.post_info?.post_id,
+      user_id: eventData.author_id,
+      content: eventData.post_info?.content,
+      timestamp: eventData.post_info?.date_time
+    }
+
+    // 获取帖子详细信息以显示标题和内容
+    this.getChannelThreadInfo(data.channel_id, data.thread_id).then(threadInfo => {
+      const thread = threadInfo?.thread
+      const title = thread?.thread_info?.title || '无标题'
+
+      // 解析帖子内容
+      let contentText = ''
+      try {
+        const content = thread?.thread_info?.content || data.content
+        if (content) {
+          const contentObj = JSON.parse(content)
+          if (contentObj.paragraphs && contentObj.paragraphs.length > 0) {
+            contentText = contentObj.paragraphs
+              .map(p => p.elems?.map(e => e.text?.text || '').join('') || '')
+              .join('')
+              .trim()
+
+            if (contentText && contentText.length > 0) {
+              contentText = contentText.substring(0, 100) // 增加内容长度限制
+            }
+          }
+        }
+      } catch (e) {
+        // JSON解析失败，尝试直接解析为文本
+        const rawContent = String(thread?.thread_info?.content || data.content || '').trim()
+        if (rawContent && rawContent.length > 0 && !/^[\{\[\<]/.test(rawContent)) {
+          contentText = rawContent.substring(0, 100)
+        }
+      }
+
+      const logMessage = contentText
+        ? `论坛帖子创建：「${title}」${contentText}${contentText.length >= 100 ? '...' : ''}`
+        : `论坛帖子创建：「${title}」`
+
+      Bot.makeLog('info', [logMessage, event], id)
+    }).catch(err => {
+      // 获取详细信息失败时的备用日志
+      Bot.makeLog('info', [`论坛帖子创建事件：[频道:${data.channel_id}, 主题:${data.thread_id}, 帖子:${data.post_id}]`, event], id)
+    })
+
+    // 触发事件
+    Bot.em('forum.post.create', data)
+  }
+
+  makeForumPostDelete(id, event) {
+    const data = {
+      raw: event,
+      bot: Bot[id],
+      self_id: id,
+      post_type: 'forum',
+      event_type: 'FORUM_POST_DELETE',
+      channel_id: event.channel_id,
+      thread_id: event.thread_id,
+      user_id: event.operator?.id,
+      timestamp: event.timestamp
+    }
+
+    Bot.makeLog('info', [`论坛帖子删除事件：[频道:${data.channel_id}, 主题:${data.thread_id}]`, event], id)
+
+    // 触发事件
+    Bot.em('forum.post.delete', data)
+  }
+
+  makeForumReply(id, event) {
+    const data = {
+      raw: event,
+      bot: Bot[id],
+      self_id: id,
+      post_type: 'forum',
+      event_type: 'FORUM_REPLY_CREATE',
+      channel_id: event.channel_id,
+      thread_id: event.thread_id,
+      reply_id: event.reply_id,
+      user_id: event.author?.id,
+      content: event.content,
+      timestamp: event.timestamp
+    }
+
+    Bot.makeLog('info', [`论坛回复创建事件：[频道:${data.channel_id}, 主题:${data.thread_id}, 回复:${data.reply_id}]`, event], id)
+
+    // 触发事件
+    Bot.em('forum.reply.create', data)
+  }
+
+  makeForumReplyDelete(id, event) {
+    const data = {
+      raw: event,
+      bot: Bot[id],
+      self_id: id,
+      post_type: 'forum',
+      event_type: 'FORUM_REPLY_DELETE',
+      channel_id: event.channel_id,
+      thread_id: event.thread_id,
+      reply_id: event.reply_id,
+      user_id: event.operator?.id,
+      timestamp: event.timestamp
+    }
+
+    Bot.makeLog('info', [`论坛回复删除事件：[频道:${data.channel_id}, 主题:${data.thread_id}, 回复:${data.reply_id}]`, event], id)
+
+    // 触发事件
+    Bot.em('forum.reply.delete', data)
   }
 
   getFriendMap(id) {
@@ -1506,6 +1794,18 @@ const adapter = new class QQBotAdapter {
 
       dau: new Dau(id, this.sep, config.dauDB),
 
+      // 获取频道线程列表
+      async getChannelThreads(channel_id) {
+        const { data: result } = await this.sdk.request.get(`/channels/${channel_id}/threads`)
+        return result
+      },
+
+      // 获取频道线程信息
+      async getChannelThreadInfo(channel_id, thread_id) {
+        const { data: result } = await this.sdk.request.get(`/channels/${channel_id}/threads/${thread_id}`)
+        return result
+      },
+
       callback: {}
     }
 
@@ -1542,6 +1842,10 @@ const adapter = new class QQBotAdapter {
 
     Bot[id].sdk.on('message', event => this.makeMessage(id, event))
     Bot[id].sdk.on('notice', event => this.makeNotice(id, event))
+    Bot[id].sdk.on('FORUM_POST_CREATE', event => this.makeForumPost(id, event))
+    Bot[id].sdk.on('FORUM_POST_DELETE', event => this.makeForumPostDelete(id, event))
+    Bot[id].sdk.on('FORUM_REPLY_CREATE', event => this.makeForumReply(id, event))
+    Bot[id].sdk.on('FORUM_REPLY_DELETE', event => this.makeForumReplyDelete(id, event))
 
     Bot.makeLog("mark", `${this.name}(${this.id}) ${this.version} ${Bot[id].nickname} 已连接`, id)
     Bot.em(`connect.${id}`, { self_id: id })
@@ -1573,8 +1877,12 @@ const adapter = new class QQBotAdapter {
 
   async load() {
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
-    for (const token of config.token)
-      await Bot.sleep(5000, this.connect(token))
+    for (const token of config.token) {
+      await new Promise(resolve => {
+        adapter.connect(token).then(resolve)
+        setTimeout(resolve, 5000)
+      })
+    }
   }
 }()
 

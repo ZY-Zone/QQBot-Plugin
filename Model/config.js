@@ -28,6 +28,8 @@ let { config, configSave } = await makeConfig('QQBot', {
   markdown: {
     template: 'abcdefghij'
   },
+  keyboard: {},  // 按钮模板ID映射，格式如："3889001286": "102076896_1763887100"
+
   sendButton: true,
   customMD: {},
   mdSuffix: {},
@@ -45,7 +47,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   token: []
 }, {
   tips: [
-    '欢迎使用 TRSS-Yunzai QQBot Plugin ! 作者：时雨🌌星空 & 小叶 & TS霆生',
+    '欢迎使用 TRSS-Yunzai QQBot Plugin ! 作者：时雨🌌星空 & 小叶 & 小丞 & TS霆生',
     '地址：https://gitee.com/ts-yf/QQBot-Plugin'
   ]
 })
