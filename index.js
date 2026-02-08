@@ -8,13 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { encode as encodeSilk, isSilk } from 'silk-wasm'
 import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating } from './Model/index.js'
 
-const QQBot = await (async () => {
-  try {
-    return (await import('qq-official-bot')).Bot
-  } catch (error) {
-    return (await import('qq-group-bot')).Bot
-  }
-})()
+import { Bot as QQBot, ReceiverMode } from 'qq-official-bot'
 
 const startTime = new Date()
 logger.info(logger.yellow('- 正在加载 QQBot 适配器插件'))
@@ -35,7 +29,7 @@ const adapter = new class QQBotAdapter {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
-    this.version = 'qq-official-bot v25.04.28'
+    this.version = 'qq-official-bot v26.02.08'
 
     if (typeof config.toQRCode == 'boolean') {
       this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
@@ -1732,14 +1726,20 @@ const adapter = new class QQBotAdapter {
       appid: token[1],
       token: token[2],
       secret: token[3],
+      sandbox: false,                 // 是否为沙箱环境
+      removeAt: true,                 // 自动移除消息中的 @机器人
+      logLevel: 'info',               // 日志级别
+      maxRetry: 10,                   // 最大重连次数
       intents: [
-        'GUILDS',
-        'GUILD_MEMBERS',
-        'GUILD_MESSAGE_REACTIONS',
-        'DIRECT_MESSAGE',
-        'INTERACTION',
-        'MESSAGE_AUDIT'
-      ]
+          'GROUP_AT_MESSAGE_CREATE',     // 群聊@消息事件
+          'C2C_MESSAGE_CREATE',          // 私聊消息事件
+          'GUILD_MESSAGES',              // 频道消息事件
+          'DIRECT_MESSAGE',              // 频道私信事件
+          'GUILD_MESSAGE_REACTIONS',     // 频道消息表态事件
+          'GUILDS',                      // 频道变更事件
+          'GUILD_MEMBERS',               // 频道成员变更事件
+      ],
+      mode: ReceiverMode.WEBSOCKET,   // 连接模式
     }
 
     if (Number(token[4])) opts.intents.push('GROUP_AT_MESSAGE_CREATE', 'C2C_MESSAGE_CREATE')
@@ -1825,15 +1825,57 @@ const adapter = new class QQBotAdapter {
       }
     }
 
+    if (opts.ApiUrl) {
+      Bot[id].sdk.request.defaults.baseURL = opts.ApiUrl
+      Bot[id].sdk.logger.info(`[TSBOT-CLIENT] 使用自定义ApiUrl`)
+    }
+
     try {
+      let selfInfo = null
+      
+      if (opts.WsUrl) {
+        Bot[id].sdk.sessionManager.getWsUrl = async function() {
+          Bot[id].sdk.logger.info(`[TSBOT-CLIENT] 使用自定义WsUrl`)
+          this._wsUrl = opts.WsUrl
+          return opts.WsUrl
+        }
+        
+        // 获取机器人信息
+        await Bot[id].sdk.sessionManager.getAccessToken()
+        selfInfo = await Bot[id].sdk.getSelfInfo()
+        
+        if (Bot[id].sdk.sessionManager.receiver && typeof Bot[id].sdk.sessionManager.receiver.handleReadyEvent === 'function') {
+          const receiver = Bot[id].sdk.sessionManager.receiver
+          const originalHandleReadyEvent = receiver.handleReadyEvent.bind(receiver)
+          const savedSelfInfo = selfInfo
+          const sessionManager = Bot[id].sdk.sessionManager
+          
+          receiver.handleReadyEvent = function(packet) {
+            originalHandleReadyEvent(packet)
+            if (savedSelfInfo && this.session) {
+              const bot = this.session.getBot()
+              bot.self_id = savedSelfInfo.id
+              bot.nickname = savedSelfInfo.username
+            }
+            setTimeout(() => {
+              if (sessionManager && sessionManager.listenerCount('READY') > 0) {
+                sessionManager.emit('READY')
+              }
+            }, 0)
+          }
+        }
+      }
+
       if (token[4] === "2") {
         await Bot[id].sdk.sessionManager.getAccessToken()
         Bot[id].login = () => this.appid[opts.appid] = Bot[id]
         Bot[id].logout = () => delete this.appid[opts.appid]
       }
-
       await Bot[id].login()
-      Object.assign(Bot[id].info, await Bot[id].sdk.getSelfInfo())
+      if (!selfInfo) {
+        selfInfo = await Bot[id].sdk.getSelfInfo()
+      }
+      Object.assign(Bot[id].info, selfInfo)
     } catch (err) {
       Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)
       return false
