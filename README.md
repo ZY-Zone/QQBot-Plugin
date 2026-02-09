@@ -10,7 +10,7 @@ TRSS-Yunzai QQBot 适配器 插件
 
 建议使用TRSS原版,此版本为`小叶Fork个人自用`版的`修改版`,会在`任意时间`直接进行更改,且`不会`与TRSS一致  
 可使用自定义ws连接其他人搭建的webhook-to-websocket服务，从而实现无缝切换webhook  
-班级群： [1057604000](https://qm.qq.com/q/Rv6pE8M8Ug)
+班级群： [687976465](https://qm.qq.com/q/PCWuy2zV6u)
 <details><summary>自己部署webhook转发服务</summary>  
 
 - Python后端（Linux推荐）：[qbot-webhook-to-websocket](https://github.com/DevOpen-Club/qbot-webhook-to-websocket)
@@ -20,8 +20,10 @@ TRSS-Yunzai QQBot 适配器 插件
 
 <details><summary>使用TS霆生のwebhook转发服务（免费）</summary>  
 
-1. QQ机器人后台回调配置链接：`https://bot.191800.xyz/webhook?secret={secret}`，`{secret}`替换为`bot secret`
-2. 插件ws连接配置：`ws://bot.191800.xyz/ws/{secret}`，`{secret}`替换为`bot secret`
+## 为了防止滥用，此功能需要进群联系管理员授权服务。  
+1. QQ机器人后台回调配置链接：`https://ts.elaina.vin/webhook?secret={secret}`，`{secret}`替换为`bot secret`，配置回调链接不用授权，未授权的secret将不会推送消息给ws
+2. 插件ws连接配置：`ws://ts.elaina.vin:8000/ws/{secret}`，`{secret}`替换为`bot secret`  
+> 感谢`冷曦·Elaine`提供的域名服务  
 </details>
 
 
