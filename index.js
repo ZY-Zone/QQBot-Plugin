@@ -323,15 +323,15 @@ const adapter = new class QQBotAdapter {
           content += `${des}${url}`
           break
         } case 'markdown':
-        if (typeof i.data == 'object') {
-          let markdownObj = { type: 'markdown', ...i.data }
-          // 添加对hide_avatar_and_center的支持
-          if (i.data.hide_avatar_and_center) {
-            markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
-            delete markdownObj.hide_avatar_and_center
+          if (typeof i.data == 'object') {
+            let markdownObj = { type: 'markdown', ...i.data }
+            // 添加对hide_avatar_and_center的支持
+            if (i.data.hide_avatar_and_center) {
+              markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
+              delete markdownObj.hide_avatar_and_center
+            }
+            messages.push([markdownObj])
           }
-          messages.push([markdownObj])
-        }
           else content += i.data
           break
         case 'button':
@@ -348,23 +348,12 @@ const adapter = new class QQBotAdapter {
           for (const { message } of i.data) { messages.push(...(await this.makeRawMarkdownMsg(data, message))) }
           continue
         case 'raw':
-          // 对于raw类型的消息，直接添加到当前消息组中，而不是创建新的消息组
           if (Array.isArray(i.data)) {
-            // 如果是数组，将每个元素添加到当前消息组
-            for (const rawItem of i.data) {
-              if (messages.length === 0) {
-                messages.push([rawItem])
-              } else {
-                messages[messages.length - 1].push(rawItem)
-              }
-            }
+            messages.push(i.data)
+          } else if (i.data && (i.data.type === 'keyboard' || i.data.type === 'button')) {
+            button.push(i.data)
           } else {
-            // 如果是单个对象，添加到当前消息组
-            if (messages.length === 0) {
-              messages.push([i.data])
-            } else {
-              messages[messages.length - 1].push(i.data)
-            }
+            messages.push([i.data])
           }
           break
         default:
@@ -569,16 +558,16 @@ const adapter = new class QQBotAdapter {
           content = url
           break
         } case 'markdown':
-        if (typeof i.data == 'object') {
-          let markdownObj = { type: 'markdown', ...i.data }
-          // 添加对hide_avatar_and_center的支持
-          if (i.data.hide_avatar_and_center) {
-            markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
-            delete markdownObj.hide_avatar_and_center
+          if (typeof i.data == 'object') {
+            let markdownObj = { type: 'markdown', ...i.data }
+            // 添加对hide_avatar_and_center的支持
+            if (i.data.hide_avatar_and_center) {
+              markdownObj.style = { layout: 'hide_avatar_and_center', ...markdownObj.style }
+              delete markdownObj.hide_avatar_and_center
+            }
+            messages.push([markdownObj])
           }
-          messages.push([markdownObj])
-        }
-        else content += i.data
+          else content += i.data
           break
         case 'button':
           button.push(...this.makeButtons(data, i.data))
@@ -591,23 +580,12 @@ const adapter = new class QQBotAdapter {
           }
           continue
         case 'raw':
-          // 对于raw类型的消息，直接添加到当前消息组中，而不是创建新的消息组
           if (Array.isArray(i.data)) {
-            // 如果是数组，将每个元素添加到当前消息组
-            for (const rawItem of i.data) {
-              if (messages.length === 0) {
-                messages.push([rawItem])
-              } else {
-                messages[messages.length - 1].push(rawItem)
-              }
-            }
+            messages.push(i.data)
+          } else if (i.data && (i.data.type === 'keyboard' || i.data.type === 'button')) {
+            button.push(i.data)
           } else {
-            // 如果是单个对象，添加到当前消息组
-            if (messages.length === 0) {
-              messages.push([i.data])
-            } else {
-              messages[messages.length - 1].push(i.data)
-            }
+            messages.push([i.data])
           }
           break
         case 'custom':
@@ -777,10 +755,10 @@ const adapter = new class QQBotAdapter {
         case 'raw':
           if (Array.isArray(i.data)) {
             messages.push(i.data)
-            continue
+          } else if (i.data && (i.data.type === 'keyboard' || i.data.type === 'button')) {
+            button.push(i.data)
           } else {
-            // 对于单个raw对象，将其作为普通消息处理
-            i = i.data
+            messages.push([i.data])
           }
           break
         default:
@@ -877,13 +855,13 @@ const adapter = new class QQBotAdapter {
       }
     }
 
-      // 检查是否包含raw类型的消息，如果包含则使用makeRawMarkdownMsg处理
-      const hasRawMessage = Array.isArray(msg) ? msg.some(m => m.type === 'raw') : msg.type === 'raw'
-  
-      if (hasRawMessage) {
-        // 对于包含raw消息的情况，使用makeRawMarkdownMsg处理，确保markdown和按钮在同一消息中
-        msgs = await this.makeRawMarkdownMsg(data, msg)
-      } else if ((config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) && data.toQQBotMD !== false) {
+    // 检查是否包含raw类型的消息，如果包含则使用makeRawMarkdownMsg处理
+    const hasRawMessage = Array.isArray(msg) ? msg.some(m => m.type === 'raw') : msg.type === 'raw'
+
+    if (hasRawMessage) {
+      // 对于包含raw消息的情况，使用makeRawMarkdownMsg处理，确保markdown和按钮在同一消息中
+      msgs = await this.makeRawMarkdownMsg(data, msg)
+    } else if ((config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) && data.toQQBotMD !== false) {
       if (config.markdown[data.self_id] == 'raw') msgs = await this.makeRawMarkdownMsg(data, msg)
       else msgs = await this.makeMarkdownMsg(data, msg)
 
@@ -1003,9 +981,11 @@ const adapter = new class QQBotAdapter {
         case 'raw':
           if (Array.isArray(i.data)) {
             messages.push(i.data)
-            continue
+          } else if (i.data && (i.data.type === 'keyboard' || i.data.type === 'button')) {
+            button.push(i.data)
+          } else {
+            messages.push([i.data])
           }
-          i = i.data
           break
         default:
           i = { type: 'text', text: JSON.stringify(i) }
