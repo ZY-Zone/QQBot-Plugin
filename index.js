@@ -138,51 +138,8 @@ const adapter = new class QQBotAdapter {
 
   async uploadToTencentCOS(buffer) {
     try {
-      const detectImageTypeFromBuffer = (buffer) => {
-        if (!Buffer.isBuffer(buffer) || buffer.length < 12) {
-          return { ext: null, mime: null };
-        }
-        const hex = buffer.toString('hex', 0, 12).toUpperCase();
-        const firstFewBytes = buffer.toString('utf8', 0, Math.min(buffer.length, 200));
-        if (hex.startsWith('FFD8FF')) {
-          return { ext: 'jpg', mime: 'image/jpeg' };
-        }
-        if (hex.startsWith('89504E470D0A1A0A')) {
-          return { ext: 'png', mime: 'image/png' };
-        }
-        if (hex.startsWith('47494638')) {
-          const gifVersion = buffer.toString('ascii', 0, 6);
-          if (gifVersion === 'GIF87a' || gifVersion === 'GIF89a') {
-            return { ext: 'gif', mime: 'image/gif' };
-          }
-          return { ext: 'gif', mime: 'image/gif' };
-        }
-        if (hex.startsWith('424D')) {
-          return { ext: 'bmp', mime: 'image/bmp' };
-        }
-        if (hex.startsWith('52494646') && hex.slice(16, 28) === '57454250') {
-          return { ext: 'webp', mime: 'image/webp' };
-        }
-        if (hex.startsWith('49492A00') || hex.startsWith('4D4D002A')) {
-          return { ext: 'tiff', mime: 'image/tiff' };
-        }
-        if (hex.startsWith('00000100')) {
-          return { ext: 'ico', mime: 'image/x-icon' };
-        }
-        if (firstFewBytes.includes('<svg') ||
-          firstFewBytes.includes('xmlns="http://www.w3.org/2000/svg"') ||
-          firstFewBytes.includes('<?xml')) {
-          return { ext: 'svg', mime: 'image/svg+xml' };
-        }
-        return { ext: null, mime: null };
-      };
-      const { ext, mime } = detectImageTypeFromBuffer(buffer);
-      if (!ext || !mime) {
-        throw new Error('无法识别图片类型');
-      }
-      const extParam = ext.toLowerCase();
       const fetchImpl = typeof fetch !== 'undefined' ? fetch : await import('node-fetch').then(module => module.default);
-      const getResponse = await fetchImpl(`https://ci-exhibition.cloud.tencent.com/samples/createUploadKey?ext=${encodeURIComponent(extParam)}&ciProcess=sensitive-content-recognition`, {
+      const getResponse = await fetchImpl(`https://ci-exhibition.cloud.tencent.com/samples/createUploadKey?ext=png&ciProcess=sensitive-content-recognition`, {
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Linux; Android 13; 22041216C Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.179 Mobile Safari/537.36',
@@ -208,7 +165,6 @@ const adapter = new class QQBotAdapter {
       const putResponse = await fetchImpl(uploadUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': mime,
           'Authorization': uploadAuth,
           'Content-Length': buffer.length.toString(),
           'User-Agent': 'Mozilla/5.0 (Linux; Android 13; 22041216C Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.179 Mobile Safari/537.36',
