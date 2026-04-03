@@ -7,14 +7,7 @@ import imageSize from 'image-size'
 import { randomUUID } from 'node:crypto'
 import { encode as encodeSilk, isSilk } from 'silk-wasm'
 import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating } from './Model/index.js'
-
-const QQBot = await (async () => {
-  try {
-    return (await import('qq-official-bot')).Bot
-  } catch (error) {
-    return (await import('qq-group-bot')).Bot
-  }
-})()
+import { Bot as QQBot } from 'qq-official-bot'
 
 const startTime = new Date()
 logger.info(logger.yellow('- 正在加载 QQBot 适配器插件'))
@@ -35,7 +28,7 @@ const adapter = new class QQBotAdapter {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
-    this.version = 'qq-official-bot v25.04.28'
+    this.version = 'qq-official-bot v26.4.3'
 
     if (typeof config.toQRCode == 'boolean') {
       this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
@@ -126,7 +119,7 @@ const adapter = new class QQBotAdapter {
         text = text.replace(url, `${img.des}${img.url}`)
       }
     }
-    return text.replace(/@/g, '@​')
+    return text.replace(/@/g, '@​').replace(/<qqbot-/g, "<qqbot-​")
   }
 
   async makeBotImage(file) {
@@ -143,9 +136,114 @@ const adapter = new class QQBotAdapter {
     }
   }
 
+  async uploadToTencentCOS(buffer) {
+    try {
+      const detectImageTypeFromBuffer = (buffer) => {
+        if (!Buffer.isBuffer(buffer) || buffer.length < 12) {
+          return { ext: null, mime: null };
+        }
+        const hex = buffer.toString('hex', 0, 12).toUpperCase();
+        const firstFewBytes = buffer.toString('utf8', 0, Math.min(buffer.length, 200));
+        if (hex.startsWith('FFD8FF')) {
+          return { ext: 'jpg', mime: 'image/jpeg' };
+        }
+        if (hex.startsWith('89504E470D0A1A0A')) {
+          return { ext: 'png', mime: 'image/png' };
+        }
+        if (hex.startsWith('47494638')) {
+          const gifVersion = buffer.toString('ascii', 0, 6);
+          if (gifVersion === 'GIF87a' || gifVersion === 'GIF89a') {
+            return { ext: 'gif', mime: 'image/gif' };
+          }
+          return { ext: 'gif', mime: 'image/gif' };
+        }
+        if (hex.startsWith('424D')) {
+          return { ext: 'bmp', mime: 'image/bmp' };
+        }
+        if (hex.startsWith('52494646') && hex.slice(16, 28) === '57454250') {
+          return { ext: 'webp', mime: 'image/webp' };
+        }
+        if (hex.startsWith('49492A00') || hex.startsWith('4D4D002A')) {
+          return { ext: 'tiff', mime: 'image/tiff' };
+        }
+        if (hex.startsWith('00000100')) {
+          return { ext: 'ico', mime: 'image/x-icon' };
+        }
+        if (firstFewBytes.includes('<svg') ||
+          firstFewBytes.includes('xmlns="http://www.w3.org/2000/svg"') ||
+          firstFewBytes.includes('<?xml')) {
+          return { ext: 'svg', mime: 'image/svg+xml' };
+        }
+        return { ext: null, mime: null };
+      };
+      const { ext, mime } = detectImageTypeFromBuffer(buffer);
+      if (!ext || !mime) {
+        throw new Error('无法识别图片类型');
+      }
+      const extParam = ext.toLowerCase();
+      const fetchImpl = typeof fetch !== 'undefined' ? fetch : await import('node-fetch').then(module => module.default);
+      const getResponse = await fetchImpl(`https://ci-exhibition.cloud.tencent.com/samples/createUploadKey?ext=${encodeURIComponent(extParam)}&ciProcess=sensitive-content-recognition`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 13; 22041216C Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.179 Mobile Safari/537.36',
+          'sec-ch-ua-platform': '"Android"',
+          'origin': 'https://cloud.tencent.com',
+          'x-requested-with': 'mark.via',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://cloud.tencent.com/act/pro/ciExhibition?from=15775&tab=contentReview&sub=pictureReview'
+        }
+      });
+      if (!getResponse.ok) {
+        throw new Error(`获取上传凭证失败: ${getResponse.status}`);
+      }
+      const uploadData = await getResponse.json();
+      if (!uploadData?.data?.key || !uploadData?.data?.uploadAuthorization) {
+        throw new Error('获取腾讯 COS 上传凭证失败：返回数据格式异常');
+      }
+      const uploadKey = uploadData.data.key;
+      const uploadAuth = uploadData.data.uploadAuthorization;
+      const uploadUrl = "https://ci-h5-demo-1258125638.cos.ap-chengdu.myqcloud.com/" + uploadKey;
+      const putResponse = await fetchImpl(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': mime,
+          'Authorization': uploadAuth,
+          'Content-Length': buffer.length.toString(),
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 13; 22041216C Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.7204.179 Mobile Safari/537.36',
+          'sec-ch-ua-platform': '"Android"',
+          'origin': 'https://cloud.tencent.com',
+          'x-requested-with': 'mark.via',
+          'sec-fetch-site': 'same-site',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'referer': 'https://cloud.tencent.com/act/pro/ciExhibition?from=15775&tab=contentReview&sub=pictureReview'
+        },
+        body: buffer
+      });
+      if (putResponse.status === 200) {
+        const finalImageUrl = uploadUrl.startsWith('http')
+          ? uploadUrl
+          : 'https://' + uploadUrl;
+        return { success: true, url: finalImageUrl };
+      } else {
+        Bot.makeLog('error', ['腾讯 COS 上传失败', putResponse.status], 'QQBot-Plugin');
+        throw new Error(`COS 上传返回异常状态码: ${putResponse.status}`);
+      }
+    } catch (error) {
+      Bot.makeLog('error', ['腾讯 COS 上传失败', error.message], 'QQBot-Plugin');
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   async makeMarkdownImage(data, file, summary = '图片') {
     const buffer = await Bot.Buffer(file)
     const image =
+      await this.uploadToTencentCOS(buffer) ||
       await this.makeBotImage(buffer) ||
       { url: await Bot.fileToUrl(file) }
 
@@ -232,7 +330,7 @@ const adapter = new class QQBotAdapter {
           message: button.callback,
           message_id: data._ret_id
         }
-        // setTimeout(() => delete data.bot.callback[msg.id], 300000)
+        setTimeout(() => delete data.bot.callback[msg.id], 300000)
       } else {
         msg.action = {
           type: button.type ?? 2,
@@ -291,14 +389,41 @@ const adapter = new class QQBotAdapter {
     return msgs
   }
 
-  async makeRawMarkdownMsg(data, msg) {
+  makeTextChain(data, button) {
+    let msg
+
+    if (button.input) msg = `text="${button.input}"`
+    else if (button.callback) msg = `text="${button.callback}"`
+    else if (button.link) msg = `text="${button.link}"`
+    else return false
+
+    if (button.text) msg += ` show="[${button.text}]"`
+    return `<qqbot-cmd-input ${msg} />`
+  }
+
+  makeTextChains(data, button_square) {
+    const msgs = []
+    for (const button_row of button_square) {
+      const buttons = []
+      for (let button of button_row) {
+        button = this.makeTextChain(data, button)
+        if (button) buttons.push(button)
+      }
+      if (buttons.length) msgs.push(buttons.join(" "))
+    }
+    if (msgs.length) msgs.unshift("")
+    return msgs.join("\n")
+  }
+
+  async makeRawMarkdownMsg(data, msg, keyboard) {
     const messages = []
     const button = []
     let content = ''
     let reply
 
     for (let i of Array.isArray(msg) ? msg : [msg]) {
-      if (typeof i == 'object') { i = { ...i } } else { i = { type: 'text', text: i } }
+      if (typeof i === "object") i = { ...i }
+      else i = { type: "text", text: Bot.String(i) }
 
       switch (i.type) {
         case 'record':
@@ -308,15 +433,17 @@ const adapter = new class QQBotAdapter {
         case 'face':
         case 'ark':
         case 'embed':
-          messages.push([i])
-          break
         case 'file':
-          return []
-        case 'at':
-          if (i.qq == 'all') { content += '@everyone' } else { content += `<@${i.qq?.replace?.(`${data.self_id}${this.sep}`, '')}>` }
+          messages.push([i])
+          content += ''
+          break
+        case "at":
+          if (i.qq === "all") content += "<qqbot-at-everyone />"
+          else
+            content += `<@${i.qq?.replace?.(`${data.self_id}${this.sep}`, "")}>`
           break
         case 'text':
-          content += await this.makeRawMarkdownText(data, i.text, button)
+          content += await this.makeRawMarkdownText(data, i.text, keyboard && button)
           break
         case 'image': {
           const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
@@ -334,15 +461,14 @@ const adapter = new class QQBotAdapter {
           }
           else content += i.data
           break
-        case 'button':
-          button.push(...this.makeButtons(data, i.data))
+        case "button":
+          if (keyboard) button.push(...this.makeButtons(data, i.data))
+          else content += this.makeTextChains(data, i.data)
           break
-        case 'reply':
-          if (i.id.startsWith('event_')) {
-            reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
-          } else {
-            reply = i
-          }
+        case "reply":
+          if (i.id.startsWith("event_"))
+            reply = { type: "reply", event_id: i.id.replace(/^event_/, "") }
+          else reply = i
           continue
         case 'node':
           for (const { message } of i.data) { messages.push(...(await this.makeRawMarkdownMsg(data, message))) }
@@ -357,15 +483,15 @@ const adapter = new class QQBotAdapter {
           }
           break
         default:
-          content += await this.makeRawMarkdownText(data, JSON.stringify(i), button)
+          content += await this.makeRawMarkdownText(data, JSON.stringify(i), keyboard && button)
       }
     }
 
-    if (content) { messages.unshift([{ type: 'markdown', content }]) }
+    if (content) messages.unshift([{ type: "markdown", content }])
 
     if (button.length) {
       for (const i of messages) {
-        if (i[0].type == 'markdown') { i.push(...button.splice(0, 5)) }
+        if (i[0].type === "markdown") i.push(...button.splice(0, 5))
         if (!button.length) break
       }
       while (button.length) {
@@ -385,76 +511,69 @@ const adapter = new class QQBotAdapter {
     return messages
   }
 
-  makeMarkdownText(data, text, button) {
+  makeMarkdownText_(data, text) {
     const match = text.match(this.toQRCodeRegExp)
-    if (match) {
-      for (const url of match) {
-        button.push(...this.makeButtons(data, [[{ text: url, link: url }]]))
-        text = text.replace(url, '[链接(请点击按钮查看)]')
-      }
-    }
-    return text.replace(/\n/g, '\r').replace(/@/g, '@​')
+    if (match)
+      for (const url of match)
+        text = text.replace(url, this.makeTextChain(data, { text: "链接", link: url }))
+    return text
+      .replace(/\n/g, "\r")
+      .replace(/@/g, "@​")
+      .replace(/<qqbot-/g, "<qqbot-​")
   }
 
-  makeMarkdownTemplate(data, template) {
-    let keys; let custom_template_id; let params = []; let index = 0; let type = 0
-    const result = []
-    if (markdown_template) {
-      custom_template_id = markdown_template.custom_template_id
-      params = _.cloneDeep(markdown_template.params)
-      type = 1
-    } else {
-      const custom = config.customMD?.[data.self_id]
-      custom_template_id = custom?.custom_template_id || config.markdown[data.self_id]
-      keys = _.cloneDeep(custom?.keys) || config.markdown.template.split('')
+  makeMarkdownText(data, text, content) {
+    const match = text.match(/!?\[.*?\]\s*\(\w+:\/\/.*?\)/g)
+    if (match) {
+      const temp = []
+      let last = ""
+      for (const i of match) {
+        const match = i.match(/(!?\[.*?\])\s*(\(\w+:\/\/.*?\))/)
+        text = text.split(i)
+        temp.push([last + this.makeMarkdownText_(data, text.shift()), match[1]])
+        text = text.join(i)
+        last = match[2]
+      }
+      temp[0][0] = content + temp[0][0]
+      return [last + this.makeMarkdownText_(data, text), temp]
     }
-    for (const temp of template) {
-      if (!temp.length) continue
+    return [this.makeMarkdownText_(data, text)]
+  }
 
-      for (const i of splitMarkDownTemplate(temp)) {
-        if (index == (type == 1 ? markdown_template.params.length : keys.length)) {
-          result.push({
-            type: 'markdown',
-            custom_template_id,
-            params: _.cloneDeep(params)
-          })
-          params = type == 1 ? _.cloneDeep(markdown_template.params) : []
-          index = 0
-        }
+  makeMarkdownTemplate(data, templates) {
+    const msgs = []
+    for (const template of templates) {
+      if (!template.length) continue
 
-        if (type == 1) {
-          params[index].values = [i]
-        } else {
-          params.push({
-            key: keys[index],
-            values: [i]
-          })
-        }
-        index++
+      const params = []
+      for (const i in template)
+        params.push({
+          key: config.markdown.template[i],
+          values: [template[i]],
+        })
+
+      msgs.push([
+        {
+          type: "markdown",
+          custom_template_id: config.markdown[data.self_id],
+          params,
+        },
+      ])
+    }
+    return msgs
+  }
+
+  makeMarkdownTemplatePush(content, template, templates) {
+    for (const i of content) {
+      if (template.length === config.markdown.template.length - 1) {
+        template.push(i.shift())
+        template = i
+        templates.push(template)
+      } else {
+        template.push(i.join(""))
       }
     }
-
-    if (config.mdSuffix?.[data.self_id]) {
-      if (!params.some(p => config.mdSuffix[data.self_id].some(c => (c.key === p.key && p.values[0] !== '\u200B')))) {
-        for (const i of config.mdSuffix[data.self_id]) {
-          if (data.group_id) data.group = data.bot.pickGroup(data.group_id)
-          if (data.user_id) data.friend = data.bot.pickFriend(data.user_id)
-          if (data.user_id && data.group_id) data.member = data.bot.pickMember(data.group_id, data.user_id)
-          const value = getMustacheTemplating(i.values[0], { e: data })
-          params.push({ key: i.key, values: [value] })
-        }
-      }
-    }
-
-    if (params.length) {
-      result.push({
-        type: 'markdown',
-        custom_template_id,
-        params
-      })
-    }
-
-    return result
+    return template
   }
 
   async makeMarkdownMsg(data, msg) {
@@ -467,7 +586,7 @@ const adapter = new class QQBotAdapter {
 
     for (let i of Array.isArray(msg) ? msg : [msg]) {
       if (typeof i == 'object') i = { ...i }
-      else i = { type: 'text', text: i }
+      else i = { type: 'text', text: Bot.String(i) }
 
       switch (i.type) {
         case 'record':
@@ -477,20 +596,27 @@ const adapter = new class QQBotAdapter {
         case 'face':
         case 'ark':
         case 'embed':
-          messages.push([i])
-          break
         case 'file':
-          return []
+          messages.push([i])
+          content += ''
+          break
         case 'at':
-          if (i.qq == 'all') content += '@everyone'
+          if (i.qq == 'all') content += '"<qqbot-at-everyone />'
           else {
             if (config.toQQUin && userIdCache[i.qq]) i.qq = userIdCache[i.qq]
             content += `<@${i.qq?.replace?.(`${data.self_id}${this.sep}`, '')}>`
           }
           break
-        case 'text':
-          content += this.makeMarkdownText(data, i.text, button)
+        case "text": {
+          const [text, temp] = this.makeMarkdownText(data, i.text, content)
+          if (Array.isArray(temp)) {
+            template = this.makeMarkdownTemplatePush(temp, template, templates)
+            content = text
+          } else {
+            content += text
+          }
           break
+        }
         case 'node':
           if (Handler.has('ws.tool.toImg') && config.toImg) {
             const getButton = data => {
@@ -547,6 +673,7 @@ const adapter = new class QQBotAdapter {
           }
         case 'image': {
           const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
+          template = this.makeMarkdownTemplatePush([[content, des]], template, templates)
           const limit = template.length % (length - 1)
 
           // 图片数量超过模板长度时
@@ -557,7 +684,8 @@ const adapter = new class QQBotAdapter {
 
           content = url
           break
-        } case 'markdown':
+        }
+        case 'markdown':
           if (typeof i.data == 'object') {
             let markdownObj = { type: 'markdown', ...i.data }
             // 添加对hide_avatar_and_center的支持
@@ -570,7 +698,7 @@ const adapter = new class QQBotAdapter {
           else content += i.data
           break
         case 'button':
-          button.push(...this.makeButtons(data, i.data))
+          content += this.makeTextChains(data, i.data)
           break
         case 'reply':
           if (i.id.startsWith('event_')) {
@@ -591,8 +719,15 @@ const adapter = new class QQBotAdapter {
         case 'custom':
           template.push(...i.data)
           break
-        default:
-          content += this.makeMarkdownText(data, JSON.stringify(i), button)
+        default: {
+          const [text, temp] = this.makeMarkdownText(data, Bot.String(i), content)
+          if (Array.isArray(temp)) {
+            template = this.makeMarkdownTemplatePush(temp, template, templates)
+            content = text
+          } else {
+            content += text
+          }
+        }
       }
     }
 
@@ -707,6 +842,12 @@ const adapter = new class QQBotAdapter {
           i.type = 'audio'
           i.file = await this.makeRecord(i.file)
         case 'video':
+        case 'file':
+          if (message.some(s => sendType.includes(s.type))) {
+            messages.push(message)
+            message = []
+          }
+          break
         case 'image':
           if (message.some(s => sendType.includes(s.type))) {
             messages.push(message)
@@ -715,8 +856,6 @@ const adapter = new class QQBotAdapter {
           if (sharp && i.file)
             i.file = await this.compressImage(data, i.file)
           break
-        case 'file':
-          return []
         case 'reply':
           if (i.id.startsWith('event_')) {
             reply = { type: 'reply', event_id: i.id.replace(/^event_/, '') }
@@ -769,7 +908,7 @@ const adapter = new class QQBotAdapter {
         const match = i.text.match(this.toQRCodeRegExp)
         if (match) {
           for (const url of match) {
-            const msg = segment.image(await Bot.fileToUrl(await this.makeQRCode(url)))
+            const msg = segment.image(await this.makeQRCode(url))
             if (message.some(s => sendType.includes(s.type))) {
               messages.push(message)
               message = []
@@ -860,22 +999,32 @@ const adapter = new class QQBotAdapter {
 
     if (hasRawMessage) {
       // 对于包含raw消息的情况，使用makeRawMarkdownMsg处理，确保markdown和按钮在同一消息中
-      msgs = await this.makeRawMarkdownMsg(data, msg)
-    } else if ((config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) && data.toQQBotMD !== false) {
-      if (config.markdown[data.self_id] == 'raw') msgs = await this.makeRawMarkdownMsg(data, msg)
-      else msgs = await this.makeMarkdownMsg(data, msg)
+      msgs = await this.makeRawMarkdownMsg(data, msg);
+    } else if (config.markdown[data.self_id] === "legacy") {
+      // legacy 模式：使用普通消息
+      msgs = await this.makeMsg(data, msg);
+    } else if (
+      (config.markdown[data.self_id] || (data.toQQBotMD === true && config.customMD[data.self_id])) &&
+      data.toQQBotMD !== false
+    ) {
+      // markdown 模式
+      if (config.markdown[data.self_id] == "raw") {
+        msgs = await this.makeRawMarkdownMsg(data, msg);
+      } else {
+        msgs = await this.makeMarkdownMsg(data, msg);
+      }
 
-      const [mds, btns] = _.partition(msgs[0], v => v.type === 'markdown')
+      const [mds, btns] = _.partition(msgs[0], v => v.type === "markdown");
       if (mds.length > 1) {
         for (const idx in mds) {
-          msgs = mds[idx]
-          if (idx === mds.length - 1) msgs.push(...btns)
-          await sendMsg()
+          msgs = mds[idx];
+          if (idx === mds.length - 1) msgs.push(...btns);
+          await sendMsg();
         }
-        return rets
+        return rets;
       }
     } else {
-      msgs = await this.makeMsg(data, msg)
+      msgs = await this.makeRawMarkdownMsg(data, msg)
     }
 
     // if (await sendMsg() === false) {
@@ -1152,6 +1301,8 @@ const adapter = new class QQBotAdapter {
   }
 
   pickMember(id, group_id, user_id) {
+    if (typeof group_id !== "string") group_id = String(group_id)
+    if (typeof user_id !== "string") user_id = String(user_id)
     if (config.toQQUin && userIdCache[user_id]) {
       user_id = userIdCache[user_id]
     }
@@ -1171,6 +1322,7 @@ const adapter = new class QQBotAdapter {
   }
 
   pickGroup(id, group_id) {
+    if (typeof group_id !== "string") group_id = String(group_id)
     if (group_id.startsWith?.('qg_')) { return this.pickGuild(id, group_id) }
     const i = {
       ...Bot[id].gl.get(group_id),
@@ -1316,7 +1468,7 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeGuildMessage(data, event) {
-    data.message_type = 'group'
+    data.message_type = "group"
     data.sender = {
       ...data.bot.fl.get(`qg_${event.sender.user_id}`),
       ...event.sender,
@@ -1408,7 +1560,6 @@ const adapter = new class QQBotAdapter {
       case 'guild':
         await this.makeGuildMessage(data, event)
         if (data.message.length === 0) {
-          // tx.sb 群有一个空格频道没有
           data.message.push({ type: 'text', text: '' })
         }
         break
@@ -1719,7 +1870,8 @@ const adapter = new class QQBotAdapter {
         'DIRECT_MESSAGE',
         'INTERACTION',
         'MESSAGE_AUDIT'
-      ]
+      ],
+      mode: 'websocket'
     }
 
     if (Number(token[4])) opts.intents.push('GROUP_AT_MESSAGE_CREATE', 'C2C_MESSAGE_CREATE')
@@ -1744,9 +1896,9 @@ const adapter = new class QQBotAdapter {
       },
 
       uin: id,
-      info: { id, ...opts },
+      info: { id, ...opts, avatar: `https://q.qlogo.cn/g?b=qq&s=0&nk=${id}` },
       get nickname() { return this.sdk.nickname },
-      get avatar() { return `https://q.qlogo.cn/g?b=qq&s=0&nk=${id}` },
+      get avatar() { return this.info.avatar },
 
       version: {
         id: this.id,
@@ -1832,15 +1984,17 @@ const adapter = new class QQBotAdapter {
     return true
   }
 
-  async makeWebHookSign(req, secret) {
+  async makeWebHookSign(id, req, secret) {
     const { sign } = (await import("tweetnacl")).default
     const { plain_token, event_ts } = req.body.d
-    while (secret.length < 32)
-      secret = secret.repeat(2).slice(0, 32)
-    const signature = Buffer.from(sign.detached(
-      Buffer.from(`${event_ts}${plain_token}`),
-      sign.keyPair.fromSeed(Buffer.from(secret)).secretKey,
-    )).toString("hex")
+    while (secret.length < 32) secret = secret.repeat(2).slice(0, 32)
+    const signature = Buffer.from(
+      sign.detached(
+        Buffer.from(`${event_ts}${plain_token}`),
+        sign.keyPair.fromSeed(Buffer.from(secret)).secretKey,
+      ),
+    ).toString("hex")
+    Bot.makeLog("debug", ["QQBot 签名生成", { plain_token, signature }], id)
     req.res.send({ plain_token, signature })
   }
 
@@ -1857,6 +2011,7 @@ const adapter = new class QQBotAdapter {
 
   async load() {
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
+    Bot.express.quiet.push(`/${this.name}`)
     for (const token of config.token) {
       await new Promise(resolve => {
         adapter.connect(token).then(resolve)

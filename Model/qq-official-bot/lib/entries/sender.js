@@ -29,7 +29,7 @@ class Sender {
         this.messagePayload.msg_id = source.id;
     }
     getType(type) {
-        return ['image', 'video', 'audio'].indexOf(type) + 1;
+        return ['image', 'video', 'audio', 'file'].indexOf(type) + 1;
     }
     parseFromTemplate(template) {
         const result = [];
@@ -141,6 +141,7 @@ class Sender {
                 case 'image':
                 case 'audio':
                 case 'video':
+                case 'file':
                     if (this.messagePayload.msg_id || this.messagePayload.event_id) {
                         if (!this.baseUrl.startsWith('/v2')) {
                             const fileData = await this.fixGuildMediaData(elem);
@@ -153,6 +154,7 @@ class Sender {
                         }
                         else {
                             this.messagePayload.msg_type = 7;
+                            this.filePayload.file_type = this.getType(elem.type);
                             const [_, _version, target_type, target_id] = this.baseUrl.split('/');
                             const result = await this.bot.uploadMedia(target_id, target_type.slice(0, -1), elem.file, this.getType(elem.type));
                             this.messagePayload.media = { file_info: result.file_info };
