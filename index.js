@@ -418,8 +418,8 @@ const adapter = new class QQBotAdapter {
           else content += i.data
           break
         case "button":
-          if (keyboard) button.push(...this.makeButtons(data, i.data))
-          else content += this.makeTextChains(data, i.data)
+          if (config?.TextChains) content += this.makeTextChains(data, i.data)
+          else button.push(...this.makeButtons(data, i.data))
           break
         case "reply":
           if (i.id.startsWith("event_"))
@@ -654,7 +654,8 @@ const adapter = new class QQBotAdapter {
           else content += i.data
           break
         case 'button':
-          content += this.makeTextChains(data, i.data)
+          if (config?.TextChains) content += this.makeTextChains(data, i.data)
+          else button.push(...this.makeButtons(data, i.data))
           break
         case 'reply':
           if (i.id.startsWith('event_')) {
@@ -1644,11 +1645,7 @@ const adapter = new class QQBotAdapter {
                 msg = i
               }
               if (msg?.length > 0) {
-                if (event.event_id && config?.addGroupUseEventID) {
-                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg, { event_id: event.event_id }), msg)
-                } else {
                   this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
-                }
               }
             })
           }

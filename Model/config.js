@@ -38,7 +38,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   simplifiedSdkLog: false,
   markdownImgScale: 1.0,
   sep: '',
-  addGroupUseEventID: true,
+  TextChains: false,
   bot: {
     sandbox: false,
     maxRetry: Infinity,
