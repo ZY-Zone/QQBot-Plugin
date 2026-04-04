@@ -427,7 +427,7 @@ const adapter = new class QQBotAdapter {
           else reply = i
           continue
         case 'node':
-          for (const { message } of i.data) { messages.push(...(await this.makeRawMarkdownMsg(data, message))) }
+          for (const { message } of i.data) { messages.push(...(await this.makeRawMarkdownMsg(data, message, keyboard && button))) }
           continue
         case 'raw':
           if (Array.isArray(i.data)) {
@@ -955,7 +955,7 @@ const adapter = new class QQBotAdapter {
 
     if (hasRawMessage) {
       // 对于包含raw消息的情况，使用makeRawMarkdownMsg处理，确保markdown和按钮在同一消息中
-      msgs = await this.makeRawMarkdownMsg(data, msg);
+      msgs = await this.makeRawMarkdownMsg(data, msg, true);
     } else if (config.markdown[data.self_id] === "legacy") {
       // legacy 模式：使用普通消息
       msgs = await this.makeMsg(data, msg);
@@ -965,7 +965,7 @@ const adapter = new class QQBotAdapter {
     ) {
       // markdown 模式
       if (config.markdown[data.self_id] == "raw") {
-        msgs = await this.makeRawMarkdownMsg(data, msg);
+        msgs = await this.makeRawMarkdownMsg(data, msg, true);
       } else {
         msgs = await this.makeMarkdownMsg(data, msg);
       }
