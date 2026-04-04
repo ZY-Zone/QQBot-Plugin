@@ -119,7 +119,7 @@ const adapter = new class QQBotAdapter {
         text = text.replace(url, `${img.des}${img.url}`)
       }
     }
-    return text.replace(/@/g, '@​').replace(/<qqbot-/g, "<qqbot-​")
+    return text.replace(/@\u200B/g, '@').replace(/<qqbot-\u200B/g, "<qqbot-")
   }
 
   async makeBotImage(file) {
@@ -474,8 +474,8 @@ const adapter = new class QQBotAdapter {
         text = text.replace(url, this.makeTextChain(data, { text: "链接", link: url }))
     return text
       .replace(/\n/g, "\r")
-      .replace(/@/g, "@​")
-      .replace(/<qqbot-/g, "<qqbot-​")
+      .replace(/@\u200B/g, "@")
+      .replace(/<qqbot-\u200B/g, "<qqbot-")
   }
 
   makeMarkdownText(data, text, content) {
