@@ -1982,7 +1982,8 @@ const setMap = {
   转换: 'toQQUin',
   转图片: 'toImg',
   调用统计: 'callStats',
-  用户统计: 'userStats'
+  用户统计: 'userStats',
+  文字链: 'TextChains'
 }
 
 export class QQBotAdapter extends plugin {
@@ -2059,7 +2060,8 @@ export class QQBotAdapter extends plugin {
       '#QQBot用户统计',
       `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}`,
       `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}`,
-      `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}`
+      `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}`,
+      `#QQBot设置文字链${config.TextChains ? '关闭' : '开启'}`
     ].join('\n'))
   }
 
