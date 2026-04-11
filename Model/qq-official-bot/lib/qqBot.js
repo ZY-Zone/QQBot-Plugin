@@ -164,7 +164,7 @@ class QQBot extends events_1.EventEmitter {
         const file_size = fileBuffer.length;
         const md5 = (0, utils_1.md5)(fileBuffer);
         const sha1 = require('crypto').createHash('sha1').update(fileBuffer).digest('hex');
-        const md5_10m = 10002432;
+        const md5_10m = (0, utils_1.md5)(fileBuffer.slice(0, 10002432));;
         
         // 生成文件名
         let file_name = '';
