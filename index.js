@@ -8,14 +8,16 @@ import { randomUUID } from 'node:crypto'
 import { encode as encodeSilk, isSilk } from 'silk-wasm'
 import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating } from './Model/index.js'
 import { Bot as QQBot } from 'qq-official-bot'
+import { enhanceSDK, isSdk12, getSDKVersion } from './Model/sdkEnhancer.js'
 
 const startTime = new Date()
 logger.info(logger.yellow('- 正在加载 QQBot 适配器插件'))
 
 const userIdCache = {}
-var btneventid = {}
 const markdown_template = await importJS('Model/template/markdownTemplate.js', 'default')
 const TmplPkg = await importJS('templates/index.js')
+const URL_REGEXP = /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g
+const URL_REGEXP_FULL = /(?<!\[(.*?)\]\()(?<!<)https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?(?!>)/g
 let sharp
 if (config.imageLength) try {
   sharp = (await import("sharp")).default
@@ -28,19 +30,54 @@ const adapter = new class QQBotAdapter {
     this.id = 'QQBot'
     this.name = 'QQBot'
     this.path = 'data/QQBot/'
-    this.version = 'qq-official-bot v26.4.3'
+    this.version = 'QQbot v26.4.26.' + getSDKVersion()
 
-    if (typeof config.toQRCode == 'boolean') {
-      this.toQRCodeRegExp = config.toQRCode ? /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g : false
-    } else if (config.toQRCode == 'url') {
+    const toQRCode = config.toQRCode
+    if (toQRCode === true) {
+      this.toQRCodeRegExp = URL_REGEXP
+    } else if (toQRCode === 'url') {
+      this.toQRCodeRegExp = false
+      this.toQRCodeMode = 'url'
+    } else if (toQRCode === false) {
       this.toQRCodeRegExp = false
     } else {
-      this.toQRCodeRegExp = new RegExp(config.toQRCode, 'g')
+      this.toQRCodeRegExp = new RegExp(toQRCode, 'g')
     }
 
     this.sep = config.sep || ((process.platform == 'win32') && '') || ':'
     this.rawgroup = {}
     this.appid = {}
+    this.useSdk12 = isSdk12()
+  }
+
+  normalizeSdkMessage(segments) {
+    if (!Array.isArray(segments)) return []
+    return segments.map(seg => {
+      if (seg == null || typeof seg !== 'object') return seg
+      const inner = seg.data
+      if (inner != null && typeof inner === 'object' && !Array.isArray(inner)) {
+        const { data: _, ...rest } = seg
+        return { ...rest, ...inner }
+      }
+      return { ...seg }
+    })
+  }
+
+  wrapSegmentForSdk12(elem) {
+    if (elem == null || typeof elem !== 'object') return elem
+    if (typeof elem.type !== 'string') return elem
+    const d = elem.data
+    if (d != null && typeof d === 'object' && !Array.isArray(d)) return elem
+    const { type, ...rest } = elem
+    return { type, data: rest }
+  }
+
+  wrapOutgoingMessageForSdk12(message) {
+    if (!this.useSdk12) return message
+    if (Array.isArray(message)) return message.map(s => this.wrapSegmentForSdk12(s))
+    if (message != null && typeof message === 'object' && typeof message.type === 'string')
+      return this.wrapSegmentForSdk12(message)
+    return message
   }
 
   async makeRecord(file) {
@@ -74,22 +111,6 @@ const adapter = new class QQBotAdapter {
     return file
   }
 
-  async callbacks(appid, group, msg = 'TS_callback', id = '5201314') {
-    try {
-      const res = await (await fetch(`${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`)).text();
-      logger.debug(`request：${config.callbacks.url}?${config.callbacks.appid}=${appid}&${config.callbacks.group}=${group}&${config.callbacks.msg}=${msg}&${config.callbacks.id}=${id}`, res);
-      return res
-    } catch (err) {
-      logger.error(`callbacks请求失败：${err}`);
-      return ''
-    }
-  }
-
-  setrawgroup(openid, group) {
-    this.rawgroup[openid] = group
-    return this.rawgroup[openid]
-  }
-
   convertURL(url) {
     if (url == null) return '';
     const urlStr = String(url);
@@ -111,12 +132,16 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeRawMarkdownText(data, text, button) {
-    const match = text.match(this.toQRCodeRegExp)
-    if (match) {
-      for (const url of match) {
-        button.push(...this.makeButtons(data, [[{ text: url, link: url }]]))
-        const img = await this.makeMarkdownImage(data, await this.makeQRCode(url), '二维码')
-        text = text.replace(url, `${img.des}${img.url}`)
+    if (this.toQRCodeMode === 'url') {
+      text = text.replace(URL_REGEXP_FULL, '<$&>')
+    } else if (this.toQRCodeRegExp) {
+      const match = text.match(this.toQRCodeRegExp)
+      if (match) {
+        for (const url of match) {
+          button.push(...this.makeButtons(data, [[{ text: url, link: url }]]))
+          const img = await this.makeMarkdownImage(data, await this.makeQRCode(url), '二维码')
+          text = text.replace(url, `${img.des}${img.url}`)
+        }
       }
     }
     return text.replace(/@\u200B/g, '@').replace(/<qqbot-\u200B/g, "<qqbot-")
@@ -468,10 +493,13 @@ const adapter = new class QQBotAdapter {
   }
 
   makeMarkdownText_(data, text) {
-    const match = text.match(this.toQRCodeRegExp)
-    if (match)
-      for (const url of match)
-        text = text.replace(url, this.makeTextChain(data, { text: "链接", link: url }))
+    if (this.toQRCodeMode === 'url') {
+      text = text.replace(URL_REGEXP_FULL, '<$&>')
+    } else if (this.toQRCodeRegExp) {
+      text = text.replace(this.toQRCodeRegExp, (url) => {
+        return this.makeTextChain(data, { text: "链接", link: url })
+      })
+    }
     return text
       .replace(/\n/g, "\r")
       .replace(/@\u200B/g, "@")
@@ -862,19 +890,21 @@ const adapter = new class QQBotAdapter {
       }
 
       if (i.type === 'text' && i.text) {
-        const match = i.text.match(this.toQRCodeRegExp)
-        if (match) {
-          for (const url of match) {
-            const msg = segment.image(await this.makeQRCode(url))
-            if (message.some(s => sendType.includes(s.type))) {
-              messages.push(message)
-              message = []
+        if (this.toQRCodeRegExp) {
+          const match = i.text.match(this.toQRCodeRegExp)
+          if (match) {
+            for (const url of match) {
+              const msg = segment.image(await this.makeQRCode(url))
+              if (message.some(s => sendType.includes(s.type))) {
+                messages.push(message)
+                message = []
+              }
+              message.push(msg)
+              i.text = i.text.replace(url, '[链接(请扫码查看)]')
             }
-            message.push(msg)
-            i.text = i.text.replace(url, '[链接(请扫码查看)]')
           }
-        } else if (config.toQRCode == 'url') {
-          const match = i.text.match(/(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g)
+        } else if (this.toQRCodeMode === 'url') {
+          const match = i.text.match(URL_REGEXP)
           if (match) {
             for (const url of match) {
               i.text = i.text.replace(url, this.convertURL(url))
@@ -908,8 +938,9 @@ const adapter = new class QQBotAdapter {
     const sendMsg = async () => {
       for (const i of msgs) {
         try {
-          Bot.makeLog('debug', ['发送消息', i], data.self_id)
-          const ret = await send(i)
+          const payload = this.wrapOutgoingMessageForSdk12(i)
+          Bot.makeLog('debug', ['发送消息', payload], data.self_id)
+          const ret = await send(payload)
           Bot.makeLog('debug', ['发送消息返回', ret], data.self_id)
 
           rets.data.push(ret)
@@ -1017,22 +1048,6 @@ const adapter = new class QQBotAdapter {
         return res
       }
     }
-    if (config.callbacks.open) {
-      if (btneventid[`group_${data.group_id}`]) {
-        event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-      } else if (this.rawgroup[data.group_id]) {
-        await this.callbacks(data.bot.info.appid, this.rawgroup[data.group_id])
-        let i = 0
-        while (i < 10) {
-          if (btneventid[`group_${data.group_id}`]) {
-            event = { event_id: btneventid[`group_${data.group_id}`].replace(/event_/, '') }
-            break
-          }
-          i++
-          await new Promise(resolve => setTimeout(resolve, 500))
-        }
-      }
-    }
     return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
   }
 
@@ -1098,24 +1113,26 @@ const adapter = new class QQBotAdapter {
       }
 
       if (i.type == 'text' && i.text) {
-        const match = i.text.match(this.toQRCodeRegExp)
-        if (match) {
-          for (const url of match) {
-            const msg = segment.image(await this.makeQRCode(url))
-            message.push(msg)
-            if (button.length) {
-              message.push({
-                type: 'keyboard',
-                content: { rows: button }
-              })
-              button = []
+        if (this.toQRCodeRegExp) {
+          const match = i.text.match(this.toQRCodeRegExp)
+          if (match) {
+            for (const url of match) {
+              const msg = segment.image(await this.makeQRCode(url))
+              message.push(msg)
+              if (button.length) {
+                message.push({
+                  type: 'keyboard',
+                  content: { rows: button }
+                })
+                button = []
+              }
+              messages.push(message)
+              message = []
+              i.text = i.text.replace(url, '[链接(请扫码查看)]')
             }
-            messages.push(message)
-            message = []
-            i.text = i.text.replace(url, '[链接(请扫码查看)]')
           }
-        } else if (config.toQRCode == 'url') {
-          const match = i.text.match(/(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g)
+        } else if (this.toQRCodeMode === 'url') {
+          const match = i.text.match(URL_REGEXP)
           if (match) {
             for (const url of match) {
               i.text = i.text.replace(url, this.convertURL(url))
@@ -1158,8 +1175,9 @@ const adapter = new class QQBotAdapter {
     const sendMsg = async () => {
       for (const i of msgs) {
         try {
-          Bot.makeLog('debug', ['发送消息', i], data.self_id)
-          const ret = await send(i)
+          const payload = this.wrapOutgoingMessageForSdk12(i)
+          Bot.makeLog('debug', ['发送消息', payload], data.self_id)
+          const ret = await send(payload)
           Bot.makeLog('debug', ['发送消息返回', ret], data.self_id)
 
           rets.data.push(ret)
@@ -1252,6 +1270,7 @@ const adapter = new class QQBotAdapter {
     return {
       ...i,
       sendMsg: msg => this.sendFriendMsg(i, msg),
+      sendWakeUp: message => this.sendWakeUp(i, message),
       recallMsg: message_id => this.recallFriendMsg(i, message_id),
       getAvatarUrl: () => `https://q.qlogo.cn/qqapp/${i.bot.info.appid}/${i.user_id}/0`
     }
@@ -1368,9 +1387,8 @@ const adapter = new class QQBotAdapter {
       avatar: `https://q.qlogo.cn/qqapp/${data.bot.info.appid}/${event.sender.user_id}/0`
     }
     Bot.makeLog('info', `好友消息：[${data.user_id}] ${data.raw_message}`, data.self_id)
-    data.reply = msg => this.sendFriendMsg({
-      ...data, user_id: event.sender.user_id
-    }, msg, { id: data.message_id })
+    data.reply = msg =>
+      this.sendFriendMsg({ ...data, user_id: event.sender.user_id }, msg, { id: data.message_id })
     await this.setFriendMap(data)
   }
 
@@ -1395,11 +1413,8 @@ const adapter = new class QQBotAdapter {
     let logStat = filterLog.includes(_.trim(data.raw_message)) ? 'debug' : 'info'
     Bot.makeLog(logStat, `群消息：[${data.group_id}, ${data.user_id}] ${data.raw_message}`, data.self_id)
 
-    data.reply = msg => {
-      this.sendGroupMsg({
-        ...data, group_id: event.group_id
-      }, msg, { id: data.message_id })
-    }
+    data.reply = msg =>
+      this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { id: data.message_id })
     await this.setGroupMap(data)
   }
 
@@ -1415,12 +1430,17 @@ const adapter = new class QQBotAdapter {
       src_guild_id: event.src_guild_id
     }
     Bot.makeLog('info', `频道私聊消息：[${data.sender.nickname}(${data.user_id})] ${data.raw_message}`, data.self_id)
-    data.reply = msg => this.sendDirectMsg({
-      ...data,
-      user_id: event.user_id,
-      guild_id: event.guild_id,
-      channel_id: event.channel_id
-    }, msg, { id: data.message_id })
+    data.reply = msg =>
+      this.sendDirectMsg(
+        {
+          ...data,
+          user_id: event.user_id,
+          guild_id: event.guild_id,
+          channel_id: event.channel_id
+        },
+        msg,
+        { id: data.message_id }
+      )
     await this.setFriendMap(data)
   }
 
@@ -1445,11 +1465,12 @@ const adapter = new class QQBotAdapter {
     }
     data.group_id = `qg_${event.guild_id}-${event.channel_id}`
     Bot.makeLog('info', `频道消息：[${data.group_id}, ${data.sender.nickname}(${data.user_id})] ${data.raw_message}`, data.self_id)
-    data.reply = msg => this.sendGuildMsg({
-      ...data,
-      guild_id: event.guild_id,
-      channel_id: event.channel_id
-    }, msg, { id: data.message_id })
+    data.reply = msg =>
+      this.sendGuildMsg(
+        { ...data, guild_id: event.guild_id, channel_id: event.channel_id },
+        msg,
+        { id: data.message_id }
+      )
     await this.setFriendMap(data)
     await this.setGroupMap(data)
   }
@@ -1479,6 +1500,10 @@ const adapter = new class QQBotAdapter {
     })
   }
 
+  sendWakeUp(data, message) {
+    return this.sendMsg(data, msg => data.bot.sdk.messageService.sendRecallMessage(`/v2/users/${data.user_id}`, msg), message)
+  }
+
   async makeMessage(id, event) {
     const data = {
       raw: event,
@@ -1489,7 +1514,7 @@ const adapter = new class QQBotAdapter {
       sub_type: event.sub_type,
       message_id: event.message_id,
       get user_id() { return this.sender.user_id },
-      message: event.message,
+      message: this.normalizeSdkMessage(event.message),
       raw_message: event.raw_message
     }
 
@@ -1602,8 +1627,6 @@ const adapter = new class QQBotAdapter {
       case 'group':
         data.group_id = `${id}${this.sep}${event.group_id}`
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
-        btneventid[`group_${event.group_id}`] = data.message_id
-        setTimeout(() => delete btneventid[`group_${event.group_id}`], 300000)
         data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { id: data.message_id })
         await this.setGroupMap(data)
         break
@@ -1834,7 +1857,7 @@ const adapter = new class QQBotAdapter {
 
     Bot[id] = {
       adapter: this,
-      sdk: new QQBot(opts),
+      sdk: enhanceSDK(new QQBot(opts)),
       login() {
         return new Promise(resolve => {
           this.sdk.sessionManager.once('READY', resolve)
@@ -1869,13 +1892,11 @@ const adapter = new class QQBotAdapter {
       fl: await this.getFriendMap(id),
 
       pickMember: (group_id, user_id) => this.pickMember(id, group_id, user_id),
-      setrawgroup: (openid, group) => this.setrawgroup(openid, group),
       callbacks: async (group, msg, btnid) => await this.callbacks(opts.appid, group, msg, btnid),
       pickGroup: group_id => this.pickGroup(id, group_id),
       getGroupMap() { return this.gl },
       gl: await this.getGroupMap(id),
       gml: await this.getMemberMap(id),
-      btneventid,
 
       dau: new Dau(id, this.sep, config.dauDB),
 
@@ -1910,6 +1931,18 @@ const adapter = new class QQBotAdapter {
       }
     }
 
+    Bot[id].sdk.on('message', event => {
+      void this.makeMessage(id, event).catch(e =>
+        Bot.makeLog('error', [`${this.name} makeMessage`, e], id))
+    })
+    Bot[id].sdk.on('notice', event => this.makeNotice(id, event))
+    Bot[id].sdk.on('FORUM_POST_CREATE', event => this.makeForumPost(id, event))
+    Bot[id].sdk.on('FORUM_POST_DELETE', event => this.makeForumPostDelete(id, event))
+    Bot[id].sdk.on('FORUM_REPLY_CREATE', event => this.makeForumReply(id, event))
+    Bot[id].sdk.on('FORUM_REPLY_DELETE', event => this.makeForumReplyDelete(id, event))
+
+    await Bot[id].dau.init()
+
     try {
       if (token[4] === "2") {
         await Bot[id].sdk.sessionManager.getAccessToken()
@@ -1923,14 +1956,6 @@ const adapter = new class QQBotAdapter {
       Bot.makeLog("error", [`${this.name}(${this.id}) ${this.version} 连接失败`, err], id)
       return false
     }
-    await Bot[id].dau.init()
-
-    Bot[id].sdk.on('message', event => this.makeMessage(id, event))
-    Bot[id].sdk.on('notice', event => this.makeNotice(id, event))
-    Bot[id].sdk.on('FORUM_POST_CREATE', event => this.makeForumPost(id, event))
-    Bot[id].sdk.on('FORUM_POST_DELETE', event => this.makeForumPostDelete(id, event))
-    Bot[id].sdk.on('FORUM_REPLY_CREATE', event => this.makeForumReply(id, event))
-    Bot[id].sdk.on('FORUM_REPLY_DELETE', event => this.makeForumReplyDelete(id, event))
 
     Bot.makeLog("mark", `${this.name}(${this.id}) ${this.version} ${Bot[id].nickname} 已连接`, id)
     Bot.em(`connect.${id}`, { self_id: id })
@@ -1959,7 +1984,7 @@ const adapter = new class QQBotAdapter {
       return this.makeWebHookSign(req, this.appid[appid].info.secret)
     if (req.body.hasOwnProperty('t'))
       this.appid[appid].sdk.dispatchEvent(req.body.t, req.body)
-    req.res.sendStatus(200)
+    req.res.send({ code: 0 })
   }
 
   async load() {

@@ -109,10 +109,12 @@ TRSS-Yunzai QQBot 适配器 插件
 1. 准备：[TRSS-Yunzai](../../../Yunzai)
 2. 在云崽根目录/plugins 下打开终端运行命令：`Git clone ` + 此仓库链接
 3. 打开QQBot-Plugin，执行依赖安装命令：`pnpm i`
+> 默认使用qq-official-bot@1.0.3版本，如需使用qq-official-bot@1.0.12版本，则再执行`pnpm i qq-official-bot@1.0.12`  
 4. 打开：[QQ 开放平台](https://q.qq.com) 创建 Bot：  
    ① 创建机器人  
    ② 开发设置 → 得到 `机器人QQ号:AppID:Token:AppSecret`
 5. 输入：`#QQBot设置机器人QQ号:AppID:Token:AppSecret:[01]:[01]`
+> Token已全面弃用，随便填一个进去就行了
 
 ## 格式示例
 
@@ -130,10 +132,9 @@ TRSS-Yunzai QQBot 适配器 插件
 
 需要启用公网 HTTPS，开放平台添加 {url}/QQBot  
 
-## 发送图片（三选一）
+## 发送图片（二选一）
 
-- 使用内置图床（默认）
-- 使用公网地址，填入 `config/config/server.yaml:url`，浏览器打开 url，后台日志应显示访问请求
+- MD消息模式：使用内置图床发送图片
 - 切换普通消息，输入 `#QQBotMD机器人QQ号:legacy`
 
 ## 使用教程  
@@ -141,4 +142,5 @@ TRSS-Yunzai QQBot 适配器 插件
 - #QQBot账号
 - #QQBot设置 + `机器人QQ号:AppID:Token:AppSecret:是否群Bot:是否频道私域`（是1 否0）
 - #QQBotMD + `机器人QQ号:模板ID`
-- #QQBotMD + `机器人QQ号:legacy`（切换普通消息）
+- #QQBotMD + `机器人QQ号:raw/legacy`（MD消息/普通消息）
+- #QQBot设置文字链 + `开启/关闭`（是否开启按钮转文字链）
