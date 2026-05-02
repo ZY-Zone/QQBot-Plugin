@@ -1576,6 +1576,10 @@ const adapter = new class QQBotAdapter {
         Bot.makeLog('debug', ['回复按钮点击事件错误', err], data.self_id)
       }
     }
+    
+    const interactionEventId = event.notice_id?.startsWith?.('INTERACTION_CREATE:')
+      ? event.notice_id
+      : `INTERACTION_CREATE:${event.notice_id}`
 
     const data = {
       raw: event,
@@ -1585,7 +1589,7 @@ const adapter = new class QQBotAdapter {
       message_id: event.notice_id || event.event_id,
       message_type: event.notice_type,
       sub_type: 'callback',
-      get user_id() { return this.sender.user_id },
+      get user_id () { return this.sender.user_id },
       sender: { user_id: `${id}${this.sep}${event.operator_id}` },
       message: [],
       raw_message: ''
@@ -1615,19 +1619,30 @@ const adapter = new class QQBotAdapter {
     }
     event.reply(0)
 
+    const wrapWithEventId = (msg) => {
+      msg = Array.isArray(msg) ? [...msg] : [msg]
+      msg.unshift({ type: 'reply', id: `event_${interactionEventId}` })
+      return msg
+    }
+
     switch (data.message_type) {
       case 'direct':
       case 'friend':
         data.message_type = 'private'
         Bot.makeLog('info', [`好友按钮点击事件：[${data.user_id}]`, data.raw_message], data.self_id)
-
-        data.reply = msg => this.sendFriendMsg({ ...data, user_id: event.operator_id }, msg, { id: data.message_id })
+        data.reply = msg => this.sendFriendMsg(
+          { ...data, user_id: event.operator_id },
+          wrapWithEventId(msg)
+        )
         await this.setFriendMap(data)
         break
       case 'group':
         data.group_id = `${id}${this.sep}${event.group_id}`
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
-        data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { id: data.message_id })
+        data.reply = msg => this.sendGroupMsg(
+          { ...data, group_id: event.group_id },
+          wrapWithEventId(msg)
+        )
         await this.setGroupMap(data)
         break
       case 'guild':
