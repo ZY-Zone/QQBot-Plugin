@@ -25,6 +25,49 @@ if (config.imageLength) try {
   Bot.makeLog("error", ["sharp 导入错误，图片压缩关闭", err], "QQBot-Plugin")
 }
 
+function pickImageSizeOptions(options) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return false
+
+  const source = options.data && typeof options.data === 'object' && !Array.isArray(options.data)
+    ? { ...options.data, ...options }
+    : options
+
+  const result = {}
+  for (const key of ['width', 'height', 'scale']) {
+    const value = Number(source[key])
+    if (Number.isFinite(value) && value > 0) result[key] = value
+  }
+  return Object.keys(result).length ? result : false
+}
+
+function patchSegmentImageSizeOptions() {
+  const segment = globalThis.segment
+  if (!segment || typeof segment.image !== 'function' || segment.image.__qqbotImageSizePatched) return
+
+  const originImage = segment.image
+  const patchedImage = function (file, options, ...args) {
+    const sizeOptions = pickImageSizeOptions(options)
+    const image = sizeOptions
+      ? originImage.call(this, file, ...args)
+      : originImage.call(this, file, options, ...args)
+
+    if (sizeOptions && image && typeof image === 'object') {
+      if (image.data && typeof image.data === 'object' && !Array.isArray(image.data)) {
+        Object.assign(image.data, sizeOptions)
+      } else {
+        Object.assign(image, sizeOptions)
+      }
+    }
+
+    return image
+  }
+
+  Object.defineProperty(patchedImage, '__qqbotImageSizePatched', { value: true })
+  segment.image = patchedImage
+}
+
+patchSegmentImageSizeOptions()
+
 const adapter = new class QQBotAdapter {
   constructor() {
     this.id = 'QQBot'
@@ -221,7 +264,7 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  async makeMarkdownImage(data, file, summary = '图片') {
+  async makeMarkdownImage(data, file, summary = '图片', options = {}) {
     const buffer = await Bot.Buffer(file)
     const image =
       await this.uploadToTencentCOS(buffer) ||
@@ -238,8 +281,22 @@ const adapter = new class QQBotAdapter {
       }
     }
 
-    image.width = Math.floor(image.width * config.markdownImgScale)
-    image.height = Math.floor(image.height * config.markdownImgScale)
+    const imageSizeOptions = pickImageSizeOptions(options) || {}
+    const scale = imageSizeOptions.scale || config.markdownImgScale
+
+    if (imageSizeOptions.width && imageSizeOptions.height) {
+      image.width = Math.floor(imageSizeOptions.width)
+      image.height = Math.floor(imageSizeOptions.height)
+    } else if (imageSizeOptions.width && image.width && image.height) {
+      image.height = Math.floor(image.height * imageSizeOptions.width / image.width)
+      image.width = Math.floor(imageSizeOptions.width)
+    } else if (imageSizeOptions.height && image.width && image.height) {
+      image.width = Math.floor(image.width * imageSizeOptions.height / image.height)
+      image.height = Math.floor(imageSizeOptions.height)
+    } else {
+      image.width = Math.floor(image.width * scale)
+      image.height = Math.floor(image.height * scale)
+    }
 
     if (Handler.has('QQBot.makeMarkdownImage')) {
       const res = await Handler.call(
@@ -341,6 +398,14 @@ const adapter = new class QQBotAdapter {
       }
     } else return false
 
+    if(button.content || button.confirm_text || button.cancel_text){
+        msg.action.modal = {
+            content: button.content || '是否确认操作?',
+            confirm_text: button.confirm_text || '是',
+            cancel_text: button.cancel_text || '否'
+        }
+    }
+    
     if (button.permission) {
       if (button.permission == 'admin') {
         msg.action.permission.type = 1
@@ -397,6 +462,7 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeRawMarkdownMsg(data, msg, keyboard) {
+    patchSegmentImageSizeOptions()
     const messages = []
     const button = []
     let content = ''
@@ -427,7 +493,7 @@ const adapter = new class QQBotAdapter {
           content += await this.makeRawMarkdownText(data, i.text, keyboard && button)
           break
         case 'image': {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
+          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i)
           content += `${des}${url}`
           break
         } case 'markdown':
@@ -561,6 +627,7 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeMarkdownMsg(data, msg) {
+    patchSegmentImageSizeOptions()
     const messages = []
     const button = []
     let template = []
@@ -656,7 +723,7 @@ const adapter = new class QQBotAdapter {
             continue
           }
         case 'image': {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary)
+          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i)
           template = this.makeMarkdownTemplatePush([[content, des]], template, templates)
           const limit = template.length % (length - 1)
 
@@ -795,6 +862,7 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeMsg(data, msg) {
+    patchSegmentImageSizeOptions()
     const sendType = ['audio', 'image', 'video', 'file']
     const messages = []
     const button = []
@@ -1052,6 +1120,7 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeGuildMsg(data, msg) {
+    patchSegmentImageSizeOptions()
     const messages = []
     let message = []
     let reply
@@ -2054,6 +2123,11 @@ export class QQBotAdapter extends plugin {
           permission: config.permission
         },
         {
+          reg: "^#[Qq]+[Bb]ot图片限制[0-9]+$",
+          fnc: "ImageLength",
+          permission: config.permission,
+        },
+        {
           reg: new RegExp(`^#[Qq]+[Bb]ot设置(${Object.keys(setMap).join('|')})\\s*(开启|关闭)$`, 'i'),
           fnc: 'Setting',
           permission: config.permission
@@ -2093,16 +2167,24 @@ export class QQBotAdapter extends plugin {
   }
 
   help() {
-    this.reply([
-      '#QQBotdau',
-      '#QQBotdaupro',
-      '#QQBot调用统计',
-      '#QQBot用户统计',
-      `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}`,
-      `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}`,
-      `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}`,
-      `#QQBot设置文字链${config.TextChains ? '关闭' : '开启'}`
-    ].join('\n'))
+    this.reply(['# QQBot 帮助', segment.button(
+      [
+        { text: 'dau', callback: '#QQBotdau' },
+        { text: 'daupro', callback: '#QQBotdaupro' }
+      ],
+      [
+        { text: '调用统计', callback: '#QQBot调用统计' },
+        { text: '用户统计', callback: '#QQBot用户统计' }
+      ],
+      [
+        { text: `${config.TextChains ? '关闭' : '开启'}文字链`, callback: `#QQBot设置文字链${config.TextChains ? '关闭' : '开启'}` },
+        { text: `${config.toCallback ? '关闭' : '开启'}按钮回调`, callback: `#QQBot设置按钮回调${config.toCallback ? '关闭' : '开启'}` }
+      ],
+      [
+        { text: `${config.callStats ? '关闭' : '开启'}调用统计`, callback: `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}` },
+        { text: `${config.userStats ? '关闭' : '开启'}用户统计`, callback: `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}` }
+      ]
+    )])
   }
 
   refConfig() {
@@ -2127,16 +2209,25 @@ export class QQBotAdapter extends plugin {
         return false
       }
     }
-    await configSave()
+    return configSave()
   }
 
-  async Markdown() {
+  Markdown() {
     let token = this.e.msg.replace(/^#[Qq]+[Bb]ot[Mm](ark)?[Dd](own)?/i, '').trim().split(':')
     const bot_id = token.shift()
     token = token.join(':')
     this.reply(`Bot ${bot_id} Markdown 模板已设置为 ${token}`, true)
     config.markdown[bot_id] = token
-    await configSave()
+    return configSave()
+  }
+
+  ImageLength() {
+    const imageLength = +this.e.msg.replace(/^#[Qq]+[Bb]ot图片限制/, "").trim()
+    if (!(imageLength > 0)) return this.reply("请输入正确数字", true)
+    if (!sharp) return this.reply("请检查 sharp 是否正确安装", true)
+    this.reply(`图片大小已限制为 ${imageLength}MB`, true)
+    config.imageLength = imageLength
+    return configSave()
   }
 
   async Setting() {

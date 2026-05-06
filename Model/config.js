@@ -8,29 +8,21 @@ let { config, configSave } = await makeConfig('QQBot', {
   ApiUrl: { 114514: 'http://...' },
   permission: 'master',
   dauDB: 'redis',
-  toQRCode: true,
+  toQRCode: false,
   toCallback: true,
   toBotUpload: true,
   hideGuildRecall: false,
   imageLength: 3,
   toQQUin: false,
-  toImg: true,
+  toImg: false,
   callStats: false,
   userStats: false,
-  callbacks: {
-    open: false,
-    url: 'https://tsyfun.eu.org/callback',
-    appid: 'appid',
-    group: 'group',
-    msg: 'msg',
-    id: 'id',
-  },
   markdown: {
     template: 'abcdefghij'
   },
   keyboard: {},  // 按钮模板ID映射，格式如："3889001286": "102076896_1763887100"
 
-  sendButton: true,
+  sendButton: false,
   customMD: {},
   mdSuffix: {},
   btnSuffix: {},
