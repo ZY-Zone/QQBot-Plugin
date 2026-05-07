@@ -1,5 +1,3 @@
-import crypto from 'crypto'
-import fs from 'node:fs'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import path from 'path'
@@ -9,21 +7,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let SDK_VERSION = null
 
-const FILE_TYPE_MAP = {
-  '89504E47': '.png',
-  '47494638': '.gif',
-  'FFD8FF': '.jpg',
-  '25504446': '.pdf',
-  '494433': '.mp3',
-  '52494646': '.wav',
-  '00000018': '.mp4',
-  '3026B2758E66CF11': '.wmv',
-  'D0CF11E0': '.doc',
-  '504B0304': '.zip',
-  '7B22': '.json',
-  'EFBBBF': '.txt',
-  'FFFE': '.txt',
-  'FEFF': '.txt'
+const StreamInputMode = {
+  REPLACE: "replace",
+}
+
+const StreamInputState = {
+  GENERATING: 1,
+  DONE: 10,
+}
+
+const StreamContentType = {
+  MARKDOWN: "markdown",
 }
 
 export function getSDKVersion() {
@@ -50,187 +44,6 @@ export function isSdk12() {
     if (parts[i] < target[i]) return false
   }
   return true
-}
-
-function getBase64FromLocal(filepath) {
-  return fs.readFileSync(filepath.replace("file://", "")).toString('base64')
-}
-
-async function getBase64FromWeb(url) {
-  const https = require('https')
-  const urlObj = new URL(url)
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: urlObj.hostname,
-      port: urlObj.port || 443,
-      path: urlObj.pathname + urlObj.search,
-      method: 'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    }
-    const req = https.request(options, (res) => {
-      const chunks = []
-      res.on('data', (chunk) => chunks.push(chunk))
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')))
-    })
-    req.on('error', reject)
-    req.end()
-  })
-}
-
-function getFileBase64(file) {
-  if (file instanceof Uint8Array) return Buffer.from(file).toString('base64')
-  if (Buffer.isBuffer(file)) return file.toString('base64')
-  if (file.startsWith('http')) return getBase64FromWeb(file)
-  if (file.startsWith('base64://')) return file.replace('base64://', '')
-  try { return getBase64FromLocal(file) } catch { return file }
-}
-
-async function getFileBuffer(file_data) {
-  if (file_data instanceof Uint8Array) return Buffer.from(file_data)
-  if (Buffer.isBuffer(file_data)) return file_data
-  if (file_data.startsWith('http')) {
-    const res = await getBase64FromWeb(file_data)
-    return Buffer.from(res, 'base64')
-  }
-  if (file_data.startsWith('base64://')) {
-    return Buffer.from(file_data.replace('base64://', ''), 'base64')
-  }
-  try {
-    const res = await getBase64FromLocal(file_data)
-    return Buffer.from(res, 'base64')
-  } catch {
-    return Buffer.from(file_data)
-  }
-}
-
-function extractFileName(file_data) {
-  let file_name = ''
-  let file_ext = ''
-  
-  if (typeof file_data !== 'string') return { file_name, file_ext }
-  
-  if (file_data.startsWith('file://')) {
-    const path = require('path')
-    const localPath = file_data.replace('file://', '')
-    const baseName = path.basename(localPath)
-    if (baseName) {
-      file_name = baseName
-      file_ext = path.extname(baseName)
-    }
-  } else if (file_data.startsWith('http')) {
-    try {
-      const url = new URL(file_data)
-      const baseName = url.pathname.split('/').pop()
-      if (baseName && baseName.includes('.')) {
-        file_name = baseName
-        file_ext = baseName.substring(baseName.lastIndexOf('.'))
-      }
-    } catch {}
-  } else if (!file_data.startsWith('base64://')) {
-    try {
-      const path = require('path')
-      const baseName = path.basename(file_data)
-      if (baseName) {
-        file_name = baseName
-        file_ext = path.extname(baseName)
-      }
-    } catch {}
-  }
-  
-  return { file_name, file_ext }
-}
-
-function detectFileExtension(fileBuffer) {
-  const header = fileBuffer.toString('hex', 0, 16).toUpperCase()
-  for (const [signature, ext] of Object.entries(FILE_TYPE_MAP)) {
-    if (header.startsWith(signature)) return ext
-  }
-  return ''
-}
-
-function generateFileName(file_name, file_ext) {
-  if (!file_ext) file_ext = ''
-  
-  if (!file_name) {
-    const timestamp = Date.now().toString(36)
-    const random = Math.random().toString(36).substr(2, 6)
-    file_name = `up_${timestamp}_${random}${file_ext}`
-  }
-  
-  if (file_name.length > 50) {
-    const path = require('path')
-    const ext = path.extname(file_name)
-    const nameWithoutExt = file_name.substring(0, file_name.lastIndexOf('.'))
-    const shortName = nameWithoutExt.substring(0, 30) + '...'
-    file_name = shortName + ext
-  }
-  
-  return file_name
-}
-
-async function uploadFileInChunks(request, target_id, target_type, fileBuffer, file_type, originalUploadFn, options = {}) {
-  const file_size = fileBuffer.length
-  const md5 = crypto.createHash('md5').update(fileBuffer).digest('hex')
-  const sha1 = crypto.createHash('sha1').update(fileBuffer).digest('hex')
-  const md5_10m = crypto.createHash('md5').update(fileBuffer.slice(0, 10002432)).digest('hex')
-  
-  const { file_name: extractedName, file_ext: extractedExt } = extractFileName(options.fileData)
-  const detectedExt = detectFileExtension(fileBuffer)
-  const file_name = generateFileName(extractedName || '', extractedExt || detectedExt)
-
-  try {
-    const { data: prepareResult } = await request.post(`/v2/${target_type}s/${target_id}/upload_prepare`, {
-      file_type, file_name, file_size, md5, sha1, md5_10m
-    })
-
-    const { upload_id, parts } = prepareResult
-
-    for (const part of parts) {
-      const { index, presigned_url } = part
-      const start = (index - 1) * prepareResult.block_size
-      const end = Math.min(start + prepareResult.block_size, file_size)
-      const partBuffer = fileBuffer.slice(start, end)
-
-      const https = require('https')
-      const urlObj = new URL(presigned_url)
-      await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: urlObj.hostname,
-          port: urlObj.port || 443,
-          path: urlObj.pathname + urlObj.search,
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': partBuffer.length }
-        }, (res) => {
-          if (res.statusCode >= 200 && res.statusCode < 300) resolve()
-          else reject(new Error(`HTTP ${res.statusCode}`))
-        })
-        req.on('error', reject)
-        req.write(partBuffer)
-        req.end()
-      })
-
-      await request.post(`/v2/${target_type}s/${target_id}/upload_part_finish`, {
-        upload_id, part_index: index, block_size: partBuffer.length,
-        md5: crypto.createHash('md5').update(partBuffer).digest('hex')
-      })
-    }
-
-    const { data: filesResult } = await request.post(`/v2/${target_type}s/${target_id}/files`, {
-      upload_id, srv_send_msg: options.srvSendMsg ?? false
-    })
-
-    return filesResult
-  } catch (error) {
-    console.error('分片上传失败:', error)
-    if (originalUploadFn) {
-      return originalUploadFn(fileBuffer, options)
-    }
-    const base64Data = fileBuffer.toString('base64')
-    const { data: result } = await request.post(`/v2/${target_type}s/${target_id}/files`, {
-      file_type, file_data: base64Data, srv_send_msg: false
-    })
-    return result
-  }
 }
 
 function enhanceWsAndBotInfo(sessionManager, isSdk12 = false) {
@@ -287,16 +100,6 @@ function enhanceSdk3(sdk) {
     }
   }
 
-  const originalUploadMedia = sdk.uploadMedia.bind(sdk)
-  sdk.uploadMedia = async function(target_id, target_type, file_data, file_type, decode = false) {
-    const fileBuffer = await getFileBuffer(file_data)
-    const result = await uploadFileInChunks(
-      this.request, target_id, target_type, fileBuffer, file_type,
-      null, { fileData: file_data }
-    )
-    if (!decode) return result
-  }
-
   enhanceWsAndBotInfo(sdk.sessionManager, false)
 
   const originalCheckNeedToRestart = sdk.sessionManager.checkNeedToRestart.bind(sdk.sessionManager)
@@ -304,11 +107,11 @@ function enhanceSdk3(sdk) {
     const originWsUrl = this.wsUrl
     const originAccessToken = this.access_token
     this.bot.logger.debug(`[SDK-ENHANCER] checkNeedToRestart - 原始 wsUrl: ${originWsUrl}, 原始 token: ${originAccessToken ? '存在' : '不存在'}`)
-    
+
     await this.getAccessToken()
     await this.getWsUrl()
     this.bot.logger.debug(`[SDK-ENHANCER] checkNeedToRestart - 获取后 wsUrl: ${this.wsUrl}`)
-    
+
     await this.getBotInfo()
     if (!this.bot.ws || ![0, 1].includes(this.bot.ws.readyState)) {
       this.bot.logger.debug(`[SDK-ENHANCER] checkNeedToRestart - ws 不存在或未就绪，需要重启`)
@@ -328,7 +131,7 @@ function enhanceSdk3(sdk) {
     const botInfo = this.BotInfo
     const originalOnMessage = this.bot.ws.on
     const self = this
-    
+
     this.bot.ws.on = function(event, handler) {
       if (event === 'message') {
         const wrappedHandler = (data) => {
@@ -346,9 +149,28 @@ function enhanceSdk3(sdk) {
     originalStartListen.call(this)
   }
 
-  sdk.sendRecallMessage = async function(endpointPath, message) {
-    const Sender = require('qq-official-bot/lib/entries/sender.js').Sender
-    const sender = new Sender(this, endpointPath, message)
+  const Sender = require('qq-official-bot/lib/entries/sender.js').Sender
+  const originalSenderConstructor = Sender.prototype.constructor
+  Sender.prototype.constructor = function(bot, baseUrl, message, source = {}) {
+    this.bot = bot
+    originalSenderConstructor.call(this, bot, baseUrl, message, source)
+    this.smallbtn = source.smallbtn
+  }
+  
+  const originalProcessMessage = Sender.prototype.processMessage
+  Sender.prototype.processMessage = async function() {
+    await originalProcessMessage.call(this)
+    const smallbtn = this.smallbtn || this.source?.smallbtn
+    if (smallbtn && this.messagePayload.keyboard) {
+      if (!this.messagePayload.keyboard.content) {
+        this.messagePayload.keyboard.content = {}
+      }
+      this.messagePayload.keyboard.content.style = { font_size: "small" }
+    }
+  }
+  
+  sdk.sendRecallMessage = async function(endpointPath, message, source = {}) {
+    const sender = new Sender(this, endpointPath, message, source)
     await sender.processMessage()
     
     if (sender.messagePayload) {
@@ -368,108 +190,87 @@ function enhanceSdk3(sdk) {
     return result
   }
 
+  sdk.sendPrivateStreamMessage = async function(user_id, message, source, options = {}) {
+    let chunkSize = options.chunkSize || Math.ceil(message.length / 2)
+    const delay = options.delay || 100
+    this.logger?.info(`开始发送流式私聊消息到用户(${user_id}), 总长度: ${message.length}字符`)
+    let streamMsgId = null
+    let index = 0
+    let currentContent = ""
+
+    try {
+      for (let i = 0; i < message.length; i += chunkSize) {
+        const chunk = message.substring(i, i + chunkSize)
+        currentContent += chunk
+
+        const req = {
+          input_mode: StreamInputMode.REPLACE,
+          input_state: i + chunkSize >= message.length ? StreamInputState.DONE : StreamInputState.GENERATING,
+          content_type: StreamContentType.MARKDOWN,
+          content_raw: currentContent,
+          event_id: source?.event_id || `event_${Date.now()}`,
+          msg_id: source?.id || `msg_${Date.now()}`,
+          index: index++,
+        }
+
+        if (streamMsgId) req.stream_msg_id = streamMsgId
+
+        const response = await this.request.post(`/v2/users/${user_id}/stream_messages`, req)
+
+        if (!streamMsgId && response.data && response.data.id) streamMsgId = response.data.id
+
+        this.logger?.debug(`发送分片 ${index}/${Math.ceil(message.length / chunkSize)}: ${currentContent.length}字符`)
+
+        if (i + chunkSize < message.length) {
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
+
+      this.logger?.info(`流式私聊消息发送完成: ${currentContent.length}字符`)
+      return { id: streamMsgId, content: currentContent }
+
+    } catch (error) {
+      this.logger?.error(`流式消息发送失败: ${error.message}`)
+      throw error
+    }
+  }
+
+  sdk.sendPrivateMessage = async function(user_id, message, source, options = {}) {
+    this.logger?.debug('[SDK3 sendPrivateMessage] 被调用')
+    this.logger?.debug('[SDK3 sendPrivateMessage] user_id:', user_id)
+    this.logger?.debug('[SDK3 sendPrivateMessage] message:', message)
+    this.logger?.debug('[SDK3 sendPrivateMessage] source:', JSON.stringify(source, null, 2))
+    this.logger?.debug('[SDK3 sendPrivateMessage] options:', options)
+    if (options.stream) {
+      try {
+        let content = await this.processMessage?.(message) || message
+        if (!content) throw new Error()
+        if (Array.isArray(content)) {
+          content = content.map(item => {
+            if (item.type === 'markdown') return item.content || ''
+            if (item.type === 'text') return item.text || ''
+            return ''
+          }).join('')
+        }
+        if (!content || typeof content !== 'string') throw new Error('流式消息内容必须是字符串')
+        const result = await this.sendPrivateStreamMessage(user_id, content, source, options)
+        return result
+      } catch (e) {
+        this.logger?.error(`流式失败发送消息,转为普通消息: ${e.message}`)
+      }
+    }
+    this.logger?.debug('[SDK3 sendPrivateMessage] 创建 Sender 实例')
+    const sender = new Sender(this, `/v2/users/${user_id}`, message, source)
+    const result = await sender.sendMsg()
+    this.logger?.debug('[SDK3 sendPrivateMessage] 发送完成，sender.messagePayload:', JSON.stringify(sender.messagePayload, null, 2))
+    this.logger?.info(`send to User(${user_id}): ${sender.brief}`)
+    return result
+  }
+
   return sdk
 }
 
 function enhanceSdk12(sdk) {
-  let MessageBuilder = null
-  let fileUtils = null
-  try {
-    MessageBuilder = require('qq-official-bot/lib/message/builder.js').MessageBuilder
-    fileUtils = require('qq-official-bot/lib/utils/file.js')
-  } catch {}
-
-  function patchMessageBuilderForFileType() {
-    if (!MessageBuilder) return
-    const proto = MessageBuilder.prototype
-    if (proto.__qqBotAdapterFileMediaPatch) return
-    proto.__qqBotAdapterFileMediaPatch = true
-
-    proto.getMediaType = function(type) {
-      return ['image', 'video', 'audio', 'file'].indexOf(type) + 1
-    }
-
-    const origProcessElement = proto.processElement
-    proto.processElement = async function(elem) {
-      if (elem?.type === 'file') return await this.handleMedia(elem)
-      return await origProcessElement.call(this, elem)
-    }
-
-    const origHandleMedia = proto.handleMedia
-    proto.handleMedia = async function(elem) {
-      await origHandleMedia.call(this, elem)
-      const fileRef = elem?.data?.file
-      if (!this.isGuild && this.isFile && fileRef != null && this.filePayload) {
-        this.filePayload._qqAdapterFileRef = fileRef
-        this.filePayload._qqAdapterIsReply = !!(this.messagePayload.msg_id || this.messagePayload.event_id)
-      }
-    }
-  }
-
-  function patchMessageServiceForV2FileUpload() {
-    if (!sdk.messageService) return
-    const ms = sdk.messageService
-    if (ms.__qqAdapterSendMessagePatch) return
-    ms.__qqAdapterSendMessagePatch = true
-
-    const orig = ms.sendMessage.bind(ms)
-    ms.sendMessage = async function(endpointPath, message, source, options = {}) {
-      if (!MessageBuilder) return orig(endpointPath, message, source, options)
-      
-      const messageBuilder = new MessageBuilder(this.appid, !endpointPath.startsWith('/v2'), source)
-      const buildResult = await messageBuilder.build(message)
-
-      const fp = buildResult.filePayload
-      const ref = fp?._qqAdapterFileRef
-      if (ref != null && endpointPath.startsWith('/v2')) {
-        delete fp._qqAdapterFileRef
-        const isReply = fp._qqAdapterIsReply
-        delete fp._qqAdapterIsReply
-
-        const m = /^\/v2\/(users|groups)\/([^/]+)/.exec(endpointPath)
-        if (m) {
-          const targetType = m[1] === 'users' ? 'user' : 'group'
-          const targetId = m[2]
-          const uploadResult = await this.fileProcessor.uploadMedia(ref, {
-            targetType, targetId, fileType: fp.file_type, sendMessage: false
-          })
-          if (isReply) {
-            buildResult.isFile = false
-            buildResult.messagePayload.media = { file_info: uploadResult.file_info }
-          } else {
-            const fi = uploadResult?.file_info
-            fp.file_data = typeof fi === 'string' && fi.length ? fi : uploadResult
-            if (fp.srv_send_msg === undefined) fp.srv_send_msg = true
-          }
-        } else {
-          fp.file_data = await Promise.resolve(fileUtils.getFileBase64(ref))
-          if (fp.srv_send_msg === undefined) fp.srv_send_msg = true
-        }
-      } else if (fp?._qqAdapterFileRef != null) {
-        delete fp._qqAdapterFileRef
-        delete fp._qqAdapterIsReply
-      }
-
-      if (buildResult.isFile) return await this.sendFile(endpointPath, buildResult)
-      return await this.sendRegularMessage(endpointPath, buildResult, options)
-    }
-  }
-
-  patchMessageBuilderForFileType()
-
-  if (sdk.messageService && sdk.messageService.fileProcessor) {
-    const originalUploadMedia = sdk.messageService.fileProcessor.uploadMedia.bind(sdk.messageService.fileProcessor)
-    sdk.messageService.fileProcessor.uploadMedia = async function(fileData, options) {
-      const fileBuffer = await getFileBuffer(fileData)
-      return uploadFileInChunks(
-        this.request, options.targetId, options.targetType, fileBuffer, options.fileType,
-        (buf, opts) => originalUploadMedia(buf, opts),
-        { fileData, srvSendMsg: options.sendMessage }
-      )
-    }
-  }
-
-  patchMessageServiceForV2FileUpload()
 
   if (sdk.sessionManager) {
     enhanceWsAndBotInfo(sdk.sessionManager, true)
@@ -565,8 +366,33 @@ function enhanceSdk12(sdk) {
     })
   }
 
+  let MessageBuilder
+  try {
+    MessageBuilder = require('qq-official-bot/lib/message/builder.js').MessageBuilder
+    if (MessageBuilder) {
+      const originalBuilderConstructor = MessageBuilder.prototype.constructor
+      MessageBuilder.prototype.constructor = function(appid, isGuild, source) {
+        this.bot = null
+        originalBuilderConstructor.call(this, appid, isGuild, source)
+        this.smallbtn = source?.smallbtn
+      }
+      
+      const originalProcessButtons = MessageBuilder.prototype.processButtons
+      MessageBuilder.prototype.processButtons = async function() {
+        await originalProcessButtons.call(this)
+        const smallbtn = this.smallbtn || this.source?.smallbtn
+        if (smallbtn && this.messagePayload.keyboard) {
+          if (!this.messagePayload.keyboard.content) {
+            this.messagePayload.keyboard.content = {}
+          }
+          this.messagePayload.keyboard.content.style = { font_size: "small" }
+        }
+      }
+    }
+  } catch (e) {}
+  
   if (sdk.messageService) {
-    sdk.messageService.sendRecallMessage = async function(endpointPath, message, source, options = {}) {
+    sdk.messageService.sendRecallMessage = async function(endpointPath, message, source = {}, options = {}) {
       if (!MessageBuilder) return this.sendMessage(endpointPath, message, source, options)
       
       const messageBuilder = new MessageBuilder(this.appid, !endpointPath.startsWith('/v2'), source)
@@ -606,6 +432,92 @@ function enhanceSdk12(sdk) {
       }
       return Promise.reject(error)
     })
+  }
+
+  sdk.sendPrivateStreamMessage = async function(user_id, message, source, options = {}) {
+    let chunkSize = options.chunkSize || Math.ceil(message.length / 2)
+    const delay = options.delay || 100
+    this.logger?.info(`开始发送流式私聊消息到用户(${user_id}), 总长度: ${message.length}字符`)
+    let streamMsgId = null
+    let index = 0
+    let currentContent = ""
+
+    try {
+      for (let i = 0; i < message.length; i += chunkSize) {
+        const chunk = message.substring(i, i + chunkSize)
+        currentContent += chunk
+
+        const req = {
+          input_mode: StreamInputMode.REPLACE,
+          input_state: i + chunkSize >= message.length ? StreamInputState.DONE : StreamInputState.GENERATING,
+          content_type: StreamContentType.MARKDOWN,
+          content_raw: currentContent,
+          event_id: source?.event_id || `event_${Date.now()}`,
+          msg_id: source?.id || `msg_${Date.now()}`,
+          index: index++,
+        }
+
+        if (streamMsgId) req.stream_msg_id = streamMsgId
+
+        const response = await this.request.post(`/v2/users/${user_id}/stream_messages`, req)
+
+        if (!streamMsgId && response.data && response.data.id) streamMsgId = response.data.id
+
+        this.logger?.debug(`发送分片 ${index}/${Math.ceil(message.length / chunkSize)}: ${currentContent.length}字符`)
+
+        if (i + chunkSize < message.length) {
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
+
+      this.logger?.info(`流式私聊消息发送完成: ${currentContent.length}字符`)
+      return { id: streamMsgId, content: currentContent }
+
+    } catch (error) {
+      this.logger?.error(`流式消息发送失败: ${error.message}`)
+      throw error
+    }
+  }
+
+  sdk.sendPrivateMessage = async function(user_id, message, source, options = {}) {
+    this.logger?.debug('[SDK12 sendPrivateMessage] 被调用')
+    this.logger?.debug('[SDK12 sendPrivateMessage] user_id:', user_id)
+    this.logger?.debug('[SDK12 sendPrivateMessage] message:', message)
+    this.logger?.debug('[SDK12 sendPrivateMessage] source:', JSON.stringify(source, null, 2))
+    this.logger?.debug('[SDK12 sendPrivateMessage] options:', options)
+    if (options.stream) {
+      try {
+        let content = message
+        if (this.processMessage) {
+          content = await this.processMessage(message)
+        }
+        if (!content) throw new Error()
+        const result = await this.sendPrivateStreamMessage(user_id, content, source, options)
+        return result
+      } catch (e) {
+        this.logger?.error(`流式失败发送消息,转为普通消息`)
+        this.logger?.info?.(message)
+      }
+    }
+    
+    if (MessageBuilder) {
+      this.logger?.debug('[SDK12 sendPrivateMessage] 使用 MessageBuilder')
+      const messageBuilder = new MessageBuilder(this.appid, false, source)
+      const buildResult = await messageBuilder.build(message)
+      this.logger?.debug('[SDK12 sendPrivateMessage] buildResult:', JSON.stringify(buildResult, null, 2))
+      const endpointPath = `/v2/users/${user_id}`
+      
+      if (buildResult.isFile) {
+        return await this.sendFile(endpointPath, buildResult)
+      }
+      return await this.sendRegularMessage(endpointPath, buildResult, options)
+    } else {
+      this.logger?.debug('[SDK12 sendPrivateMessage] 回退使用 Sender')
+      const sender = new Sender(this, `/v2/users/${user_id}`, message, source)
+      const result = await sender.sendMsg()
+      this.logger?.info(`send to User(${user_id}): ${sender.brief}`)
+      return result
+    }
   }
 
   return sdk

@@ -1,5 +1,6 @@
 import _ from 'lodash'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import QRCode from 'qrcode'
 import fetch from 'node-fetch'
 import { join } from 'node:path'
@@ -398,14 +399,14 @@ const adapter = new class QQBotAdapter {
       }
     } else return false
 
-    if(button.content || button.confirm_text || button.cancel_text){
-        msg.action.modal = {
-            content: button.content || '是否确认操作?',
-            confirm_text: button.confirm_text || '是',
-            cancel_text: button.cancel_text || '否'
-        }
+    if (button.content || button.confirm_text || button.cancel_text) {
+      msg.action.modal = {
+        content: button.content || '是否确认操作?',
+        confirm_text: button.confirm_text || '是',
+        cancel_text: button.cancel_text || '否'
+      }
     }
-    
+
     if (button.permission) {
       if (button.permission == 'admin') {
         msg.action.permission.type = 1
@@ -465,6 +466,7 @@ const adapter = new class QQBotAdapter {
     patchSegmentImageSizeOptions()
     const messages = []
     const button = []
+    const files = []
     let content = ''
     let reply
 
@@ -480,10 +482,17 @@ const adapter = new class QQBotAdapter {
         case 'face':
         case 'ark':
         case 'embed':
-        case 'file':
           messages.push([i])
           content += ''
           break
+        case 'file': {
+          Bot.makeLog('debug', ['file segment 原始结构', i], data.self_id)
+          const fileData = this._parseFileSegment(i, data)
+          files.push(fileData)
+          Bot.makeLog('debug', ['收集文件消息', fileData], data.self_id)
+          content += ''
+          break
+        }
         case "at":
           if (i.qq === "all") content += "<qqbot-at-everyone />"
           else
@@ -529,6 +538,14 @@ const adapter = new class QQBotAdapter {
             messages.push([i.data])
           }
           break
+        case 'stream':
+          data.stream = true
+          data.chunkSize = i.data?.chunkSize ?? config.chunkSize
+          data.delay = i.data?.delay ?? config.delay
+          break
+        case 'small':
+          data.smallbtn = true
+          continue
         default:
           content += await this.makeRawMarkdownText(data, JSON.stringify(i), keyboard && button)
       }
@@ -555,6 +572,8 @@ const adapter = new class QQBotAdapter {
         else messages[i] = [reply, messages[i]]
       }
     }
+
+    if (files.length) data._files = files
     return messages
   }
 
@@ -630,6 +649,7 @@ const adapter = new class QQBotAdapter {
     patchSegmentImageSizeOptions()
     const messages = []
     const button = []
+    const files = []
     let template = []
     let content = ''
     let reply
@@ -647,10 +667,17 @@ const adapter = new class QQBotAdapter {
         case 'face':
         case 'ark':
         case 'embed':
-        case 'file':
           messages.push([i])
           content += ''
           break
+        case 'file': {
+          Bot.makeLog('debug', ['file segment 原始结构', i], data.self_id)
+          const fileData = this._parseFileSegment(i, data)
+          files.push(fileData)
+          Bot.makeLog('debug', ['收集文件消息', fileData], data.self_id)
+          content += ''
+          break
+        }
         case 'at':
           if (i.qq == 'all') content += '"<qqbot-at-everyone />'
           else {
@@ -771,6 +798,14 @@ const adapter = new class QQBotAdapter {
         case 'custom':
           template.push(...i.data)
           break
+        case 'stream':
+          data.stream = true
+          data.chunkSize = i.data?.chunkSize ?? config.chunkSize
+          data.delay = i.data?.delay ?? config.delay
+          break
+        case 'small':
+          data.smallbtn = true
+          continue
         default: {
           const [text, temp] = this.makeMarkdownText(data, Bot.String(i), content)
           if (Array.isArray(temp)) {
@@ -834,6 +869,7 @@ const adapter = new class QQBotAdapter {
         i.unshift(reply)
       }
     }
+    if (files.length) data._files = files
     return messages
   }
   async compressImage(data, file) {
@@ -866,6 +902,7 @@ const adapter = new class QQBotAdapter {
     const sendType = ['audio', 'image', 'video', 'file']
     const messages = []
     const button = []
+    const files = []
     // 添加全局按钮
     const botId = data?.self_id?.toString()
     if (botId && config.keyboard && config.keyboard[botId]) {
@@ -895,12 +932,17 @@ const adapter = new class QQBotAdapter {
           i.type = 'audio'
           i.file = await this.makeRecord(i.file)
         case 'video':
-        case 'file':
+        case 'file': {
+          Bot.makeLog('debug', ['file segment 原始结构', i], data.self_id)
+          const fileData = this._parseFileSegment(i, data)
+          files.push(fileData)
+          Bot.makeLog('debug', ['收集文件消息', fileData], data.self_id)
           if (message.some(s => sendType.includes(s.type))) {
             messages.push(message)
             message = []
           }
           break
+        }
         case 'image':
           if (message.some(s => sendType.includes(s.type))) {
             messages.push(message)
@@ -996,6 +1038,7 @@ const adapter = new class QQBotAdapter {
     if (reply) {
       for (const i of messages) i.unshift(reply)
     }
+    if (files.length) data._files = files
     return messages
   }
 
@@ -1090,15 +1133,33 @@ const adapter = new class QQBotAdapter {
     // 只尝试发送一次，避免重复发送
     await sendMsg()
 
+    if (data._files && data._files.length) {
+      await this.sendFiles(data, data._files)
+      data._files = []
+    }
+
     if (Array.isArray(data._ret_id)) { data._ret_id.push(...rets.message_id) }
     return rets
   }
 
   sendFriendMsg(data, msg, event) {
-    return this.sendMsg(data, msg => data.bot.sdk.sendPrivateMessage(data.user_id, msg, event), msg)
+    if (!event) event = {}
+    if (data.smallbtn) event.smallbtn = true
+    return this.sendMsg(data, msg => {
+      if (data.smallbtn) event.smallbtn = true
+      const options = {
+        stream: data.stream || false,
+        chunkSize: data.chunkSize,
+        delay: data.delay
+      }
+      return data.bot.sdk.sendPrivateMessage(data.user_id, msg, event, options)
+    }, msg)
   }
 
   async sendGroupMsg(data, msg, event) {
+    if (!event) event = {}
+    if (data.smallbtn) event.smallbtn = true
+
     if (Handler.has('QQBot.group.sendMsg')) {
       const res = await Handler.call(
         'QQBot.group.sendMsg',
@@ -1116,7 +1177,10 @@ const adapter = new class QQBotAdapter {
         return res
       }
     }
-    return this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(data.group_id, msg, event), msg)
+    return this.sendMsg(data, msg => {
+      if (data.smallbtn) event.smallbtn = true
+      return data.bot.sdk.sendGroupMessage(data.group_id, msg, event)
+    }, msg)
   }
 
   async makeGuildMsg(data, msg) {
@@ -1288,6 +1352,434 @@ const adapter = new class QQBotAdapter {
     return this.sendGMsg(data, msg => data.bot.sdk.sendDirectMessage(data.guild_id, msg, event), msg)
   }
 
+  _parseFileSegment(i, data) {
+    let fileData = {
+      file: null,
+      name: null,
+      force_chunk: false,
+      recall_time: 0
+    }
+
+    if (typeof i.file === 'string') {
+      fileData.file = i.file
+
+      if (typeof i.name === 'object' && i.name !== null) {
+        fileData.name = i.name.name || null
+        fileData.force_chunk = typeof i.name.force_chunk !== 'undefined' ? !!i.name.force_chunk : false
+        fileData.recall_time = Number(i.name.recall_time) || 0
+      } else {
+        fileData.name = i.name || null
+
+        let thirdParam = undefined
+        if (typeof i.force_chunk !== 'undefined') {
+          thirdParam = i.force_chunk
+        } else if (typeof i.data !== 'undefined' && typeof i.data !== 'object') {
+          thirdParam = i.data
+        } else if (typeof i[2] !== 'undefined') {
+          thirdParam = i[2]
+        } else if (typeof i['2'] !== 'undefined') {
+          thirdParam = i['2']
+        } else if (Array.isArray(i.args) && i.args.length > 0) {
+          thirdParam = i.args[0]
+        }
+        fileData.force_chunk = typeof thirdParam !== 'undefined' ? !!thirdParam : false
+
+        let fourthParam = undefined
+        if (typeof i.recall_time !== 'undefined') {
+          fourthParam = i.recall_time
+        } else if (typeof i[3] !== 'undefined') {
+          fourthParam = i[3]
+        } else if (typeof i['3'] !== 'undefined') {
+          fourthParam = i['3']
+        } else if (Array.isArray(i.args) && i.args.length > 1) {
+          fourthParam = i.args[1]
+        }
+        fileData.recall_time = Number(fourthParam) || 0
+      }
+    } else if (typeof i.file === 'object' && i.file !== null) {
+      if (i.file.file) {
+        fileData.file = i.file.file
+        fileData.name = i.file.name || i.name || null
+        fileData.force_chunk = typeof i.file.force_chunk !== 'undefined'
+          ? !!i.file.force_chunk
+          : (typeof i.force_chunk !== 'undefined' ? !!i.force_chunk : false)
+        fileData.recall_time = Number(i.file.recall_time ?? i.recall_time) || 0
+      } else {
+        fileData.file = i.file
+        fileData.name = i.name || null
+        fileData.force_chunk = typeof i.force_chunk !== 'undefined' ? !!i.force_chunk : false
+        fileData.recall_time = Number(i.recall_time) || 0
+      }
+    }
+
+    if (!fileData.name && typeof fileData.file === 'string' && fileData.file.startsWith('http')) {
+      try {
+        const url = new URL(fileData.file)
+        const lastSegment = url.pathname.split('/').pop()
+        const fileNameWithoutParams = lastSegment.split('?')[0]
+        if (fileNameWithoutParams && fileNameWithoutParams.includes('.')) {
+          fileData.name = decodeURIComponent(fileNameWithoutParams)
+        }
+      } catch { }
+    }
+
+    return fileData
+  }
+
+  async recallMessageById(data, message_id, target_type, target_id) {
+    try {
+      const url = `/v2/${target_type}s/${target_id}/messages/${message_id}`
+      Bot.makeLog('debug', ['撤回消息', { url, target_type, target_id, message_id }], data.self_id)
+      await data.bot.sdk.request.delete(url)
+      Bot.makeLog('info', [`撤回${target_type === 'group' ? '群' : '私聊'}文件消息成功`, { target_id, message_id }], data.self_id)
+    } catch (err) {
+      Bot.makeLog('error', ['撤回消息失败', { target_type, target_id, message_id }, err.message, err.response?.data], data.self_id)
+    }
+  }
+
+  async uploadFileToQQ(data, target_id, target_type, file_data, file_name, force_chunk = false) {
+    if (typeof file_data === 'string' && file_data.startsWith('http') && !force_chunk) {
+      let fileSizeMB = 0
+      try {
+        const headResponse = await fetch(file_data, { method: 'HEAD' })
+        const contentLength = headResponse.headers.get('content-length')
+        fileSizeMB = contentLength ? parseInt(contentLength) / (1024 * 1024) : 0
+        Bot.makeLog('info', [`网络文件大小: ${fileSizeMB.toFixed(2)} MB`], data.self_id)
+      } catch (err) {
+        Bot.makeLog('debug', ['无法获取文件大小，尝试直传', err.message], data.self_id)
+      }
+
+      Bot.makeLog('info', ['检测到网络 URL，使用直传（不下载文件）', { url: file_data.substring(0, 100), file_name }], data.self_id)
+
+      try {
+        const filesUrl = `/v2/${target_type}s/${target_id}/files`
+        const filesData = {
+          file_type: 4,
+          srv_send_msg: false,
+          url: file_data,
+          file_name: file_name || this.extractFileNameFromUrl(file_data)
+        }
+
+        Bot.makeLog('debug', ['URL 直传', filesUrl, filesData], data.self_id)
+
+        const { data: result } = await data.bot.sdk.request.post(filesUrl, filesData)
+
+        Bot.makeLog('info', ['URL 直传成功，无需下载文件', result], data.self_id)
+
+        return result
+      } catch (error) {
+        Bot.makeLog('warn', ['URL 直传失败', error.message, error.response?.data], data.self_id)
+
+        if (fileSizeMB > 10) {
+          Bot.makeLog('info', [`文件大于 10MB (${fileSizeMB.toFixed(2)} MB)，降级为分片上传`], data.self_id)
+          force_chunk = true
+        } else {
+          Bot.makeLog('info', [`文件较小 (${fileSizeMB.toFixed(2)} MB)，降级为 base64 上传`], data.self_id)
+        }
+      }
+    }
+
+    const getFileBuffer = async (file_data) => {
+      if (file_data instanceof Uint8Array) {
+        return Buffer.from(file_data)
+      } else if (Buffer.isBuffer(file_data)) {
+        return file_data
+      } else if (typeof file_data === 'string') {
+        if (file_data.startsWith('http')) {
+          Bot.makeLog('info', ['开始下载网络文件...'], data.self_id)
+          const response = await fetch(file_data)
+          const buffer = Buffer.from(await response.arrayBuffer())
+          Bot.makeLog('info', [`下载完成，大小: ${(buffer.length / 1024 / 1024).toFixed(2)} MB`], data.self_id)
+          return buffer
+        } else if (file_data.startsWith('base64://')) {
+          return Buffer.from(file_data.replace('base64://', ''), 'base64')
+        } else if (file_data.startsWith('file://')) {
+          return fs.readFileSync(file_data.replace('file://', ''))
+        } else {
+          try {
+            return fs.readFileSync(file_data)
+          } catch {
+            return Buffer.from(file_data)
+          }
+        }
+      } else {
+        throw new Error('不支持的文件数据类型')
+      }
+    }
+
+    const extractFileName = (file_data, fileBuffer) => {
+      let name = ''
+      let ext = ''
+
+      if (typeof file_data === 'string') {
+        if (file_data.startsWith('http')) {
+          try {
+            const url = new URL(file_data)
+            const pathname = url.pathname
+            const segments = pathname.split('/')
+            const lastSegment = segments[segments.length - 1]
+            const fileNameWithoutParams = lastSegment.split('?')[0]
+            if (fileNameWithoutParams && fileNameWithoutParams.includes('.')) {
+              name = decodeURIComponent(fileNameWithoutParams)
+              ext = name.substring(name.lastIndexOf('.'))
+            }
+          } catch { }
+        } else if (file_data.startsWith('file://')) {
+          const path = file_data.replace('file://', '')
+          name = path.split('/').pop() || path.split('\\').pop()
+          if (name && name.includes('.')) {
+            ext = name.substring(name.lastIndexOf('.'))
+          }
+        } else {
+          name = file_data.split('/').pop() || file_data.split('\\').pop()
+          if (name && name.includes('.')) {
+            ext = name.substring(name.lastIndexOf('.'))
+          }
+        }
+      }
+
+      if (!ext && fileBuffer) {
+        const header = fileBuffer.toString('hex', 0, 16).toUpperCase()
+        const fileTypeMap = {
+          '89504E47': '.png',
+          '47494638': '.gif',
+          'FFD8FF': '.jpg',
+          '25504446': '.pdf',
+          '494433': '.mp3',
+          '52494646': '.wav',
+          '00000018': '.mp4',
+          '00000020': '.mp4',
+          'D0CF11E0': '.doc',
+          '504B0304': '.zip',
+          '7B22': '.json',
+          '3C3F786D': '.xml',
+          'EFBBBF': '.txt',
+          'FFFE': '.txt',
+          'FEFF': '.txt'
+        }
+
+        for (const [signature, extension] of Object.entries(fileTypeMap)) {
+          if (header.startsWith(signature)) {
+            ext = extension
+            break
+          }
+        }
+
+        if (header.startsWith('52494646')) {
+          const riffType = fileBuffer.toString('hex', 8, 12).toUpperCase()
+          if (riffType === '57454250') {
+            ext = '.webp'
+          } else {
+            ext = '.wav'
+          }
+        }
+      }
+
+      if (!name || !name.includes('.')) {
+        const timestamp = Date.now().toString(36)
+        const random = Math.random().toString(36).substring(2, 8)
+        name = `file_${timestamp}_${random}${ext || '.bin'}`
+      }
+
+      if (name.length > 100) {
+        const extension = name.substring(name.lastIndexOf('.'))
+        const baseName = name.substring(0, name.lastIndexOf('.'))
+        name = baseName.substring(0, 80) + '...' + extension
+      }
+
+      return name
+    }
+
+    try {
+      const fileBuffer = await getFileBuffer(file_data)
+      const file_size = fileBuffer.length
+
+      if (!file_name) {
+        file_name = extractFileName(file_data, fileBuffer)
+      }
+
+      const shouldUseChunk = force_chunk || target_type === 'user'
+
+      Bot.makeLog('debug', ['上传方式判断', { force_chunk, target_type, shouldUseChunk, file_size_mb: (file_size / 1024 / 1024).toFixed(2) }], data.self_id)
+
+      if (!shouldUseChunk && target_type === 'group') {
+        Bot.makeLog('debug', ['群聊使用 base64 直传', { target_id, file_name, size: file_size }], data.self_id)
+
+        const filesUrl = `/v2/${target_type}s/${target_id}/files`
+        const base64Data = fileBuffer.toString('base64')
+        const filesData = {
+          file_type: 4,
+          srv_send_msg: false,
+          file_data: base64Data,
+          file_name: file_name
+        }
+
+        const { data: result } = await data.bot.sdk.request.post(filesUrl, filesData)
+
+        Bot.makeLog('debug', ['群聊 base64 直传成功', result], data.self_id)
+
+        return result
+      }
+
+      const md5Hash = crypto.createHash('md5').update(fileBuffer).digest('hex')
+      const sha1Hash = crypto.createHash('sha1').update(fileBuffer).digest('hex')
+      const MD5_10M_SIZE = 10002432
+      const md5_10m = crypto.createHash('md5')
+        .update(fileBuffer.slice(0, Math.min(MD5_10M_SIZE, file_size)))
+        .digest('hex')
+
+      Bot.makeLog('debug', ['准备分片上传', { target_id, target_type, file_name, file_size }], data.self_id)
+
+      const { data: prepareResult } = await data.bot.sdk.request.post(`/v2/${target_type}s/${target_id}/upload_prepare`, {
+        file_type: 4,
+        file_name,
+        file_size,
+        md5: md5Hash,
+        sha1: sha1Hash,
+        md5_10m
+      })
+
+      const { upload_id, parts } = prepareResult
+
+      for (const part of parts) {
+        const { index, presigned_url } = part
+        const start = (index - 1) * prepareResult.block_size
+        const end = Math.min(start + prepareResult.block_size, file_size)
+        const partBuffer = fileBuffer.slice(start, end)
+
+        await fetch(presigned_url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': partBuffer.length },
+          body: partBuffer
+        })
+
+        await data.bot.sdk.request.post(`/v2/${target_type}s/${target_id}/upload_part_finish`, {
+          upload_id,
+          part_index: index,
+          block_size: partBuffer.length,
+          md5: crypto.createHash('md5').update(partBuffer).digest('hex')
+        })
+      }
+
+      const { data: filesResult } = await data.bot.sdk.request.post(`/v2/${target_type}s/${target_id}/files`, {
+        upload_id,
+        srv_send_msg: false
+      })
+
+      Bot.makeLog('info', ['分片上传成功', filesResult], data.self_id)
+
+      return filesResult
+    } catch (error) {
+      Bot.makeLog('error', ['文件上传失败', error.message], data.self_id)
+      throw error
+    }
+  }
+
+  extractFileNameFromUrl(url) {
+    try {
+      const urlObj = new URL(url)
+      const lastSegment = urlObj.pathname.split('/').pop()
+      const fileNameWithoutParams = lastSegment.split('?')[0]
+      if (fileNameWithoutParams && fileNameWithoutParams.includes('.')) {
+        return decodeURIComponent(fileNameWithoutParams)
+      }
+    } catch { }
+    return null
+  }
+
+  async sendFileMessage(data, target_id, target_type, fileInfo) {
+    try {
+      let actualFile, actualName, actualForceChunk, actualRecallTime
+
+      if (typeof fileInfo.file === 'object' && fileInfo.file !== null && fileInfo.file.file) {
+        actualFile = fileInfo.file.file
+        actualName = fileInfo.file.name || fileInfo.name
+        actualForceChunk = !!(fileInfo.file.force_chunk || fileInfo.force_chunk)
+        actualRecallTime = fileInfo.file.recall_time ?? fileInfo.recall_time ?? 0
+      } else {
+        actualFile = fileInfo.file
+        actualName = fileInfo.name
+        actualForceChunk = !!(fileInfo.force_chunk)
+        actualRecallTime = fileInfo.recall_time ?? 0
+      }
+
+      actualRecallTime = Number(actualRecallTime) || 0
+
+      Bot.makeLog('debug', ['解析后的文件信息', {
+        actualFile: typeof actualFile === 'string' ? actualFile : 'Buffer',
+        actualName,
+        actualForceChunk,
+        actualRecallTime
+      }], data.self_id)
+
+      const result = await this.uploadFileToQQ(
+        data,
+        target_id,
+        target_type,
+        actualFile,
+        actualName,
+        actualForceChunk
+      )
+
+      const messageUrl = `/v2/${target_type}s/${target_id}/messages`
+      const messageData = {
+        msg_type: 7,
+        media: { file_info: result.file_info }
+      }
+
+      if (data.message_id) {
+        messageData.msg_id = data.message_id
+      }
+
+      Bot.makeLog('debug', ['发送文件消息', messageUrl, messageData], data.self_id)
+
+      const { data: sendResult } = await data.bot.sdk.request.post(messageUrl, messageData)
+
+      Bot.makeLog('debug', ['文件消息发送成功', sendResult], data.self_id)
+
+      if (actualRecallTime > 0 && sendResult && sendResult.id) {
+        const msgId = sendResult.id
+        Bot.makeLog('info', [`文件消息将在 ${actualRecallTime} 秒后撤回`, { msgId, target_type, target_id }], data.self_id)
+        setTimeout(async () => {
+          await this.recallMessageById(data, msgId, target_type, target_id)
+        }, actualRecallTime * 1000)
+      }
+
+      return { id: sendResult.id }
+    } catch (error) {
+      Bot.makeLog('error', ['文件消息发送失败', error.message], data.self_id)
+      throw error
+    }
+  }
+
+  async sendFiles(data, files) {
+    let target_type, target_id
+
+    if (data.group_id) {
+      target_type = 'group'
+      target_id = data.raw?.group_id || data.group_id.replace(`${data.self_id}${this.sep}`, '')
+    } else {
+      target_type = 'user'
+      target_id = data.raw?.sender?.user_id || data.user_id.replace(`${data.self_id}${this.sep}`, '')
+    }
+
+    Bot.makeLog('debug', ['准备发送文件列表', { target_type, target_id, count: files.length }], data.self_id)
+
+    for (const fileInfo of files) {
+      try {
+        await this.sendFileMessage(data, target_id, target_type, fileInfo)
+        Bot.makeLog('info', ['文件发送成功', { target_type, target_id, file: fileInfo.name, force_chunk: fileInfo.force_chunk, recall_time: fileInfo.recall_time }], data.self_id)
+      } catch (err) {
+        Bot.makeLog('error', ['发送文件失败', fileInfo, err.message, err.response?.data], data.self_id)
+      }
+    }
+  }
+
+  async sendInputNotify(user_id, input_type, input_second, msg_id) {
+    const result = await data.bot.sdk.request.post(`/v2/users/${user_id}/messages`, { msg_type: 6, input_notify: { input_type, input_second }, msg_id })
+    return result.data?.ext_info || { ref_idx: '' }
+  }
+
   async recallMsg(data, recall, message_id) {
     if (!Array.isArray(message_id)) message_id = [message_id]
     const msgs = []
@@ -1452,10 +1944,23 @@ const adapter = new class QQBotAdapter {
     data.sender = {
       user_id: `${data.self_id}${this.sep}${event.sender.user_id}`,
       raw_user_id: event.sender.user_id,
-      nickname: `${data.self_id}_${event.sender.user_id}`,
+      nickname: event.sender.user_name,
       avatar: `https://q.qlogo.cn/qqapp/${data.bot.info.appid}/${event.sender.user_id}/0`
     }
     Bot.makeLog('info', `好友消息：[${data.user_id}] ${data.raw_message}`, data.self_id)
+
+    for (const item of event.message_scene.ext) {
+      if (item.startsWith("ref_msg_idx=")) {
+        data.ref_msg_idx = item.slice("ref_msg_idx=".length);
+      } else if (item.startsWith("msg_idx=")) {
+        data.msg_idx = item.slice("msg_idx=".length);
+      }
+    }
+
+    data.msg_elements = event.msg_elements || []
+
+    data.sendInputNotify = input_second => data.bot.sdk.sendFriendInputNotify(data.openid, 1, input_second || 30, data.message_id)
+
     data.reply = msg =>
       this.sendFriendMsg({ ...data, user_id: event.sender.user_id }, msg, { id: data.message_id })
     await this.setFriendMap(data)
@@ -1465,9 +1970,20 @@ const adapter = new class QQBotAdapter {
     data.sender = {
       user_id: `${data.self_id}${this.sep}${event.sender.user_id}`,
       raw_user_id: event.sender.user_id,
-      nickname: `${data.self_id}_${event.sender.user_id}`,
+      nickname: event.sender.user_name,
       avatar: `https://q.qlogo.cn/qqapp/${data.bot.info.appid}/${event.sender.user_id}/0`
     }
+
+    for (const item of event.message_scene.ext) {
+      if (item.startsWith("ref_msg_idx=")) {
+        data.ref_msg_idx = item.slice("ref_msg_idx=".length);
+      } else if (item.startsWith("msg_idx=")) {
+        data.msg_idx = item.slice("msg_idx=".length);
+      }
+    }
+
+    data.msg_elements = event.msg_elements || []
+
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
       const user_id = await Handler.call('ws.tool.findUserId', { user_id: data.user_id })
@@ -1645,7 +2161,7 @@ const adapter = new class QQBotAdapter {
         Bot.makeLog('debug', ['回复按钮点击事件错误', err], data.self_id)
       }
     }
-    
+
     const interactionEventId = event.notice_id?.startsWith?.('INTERACTION_CREATE:')
       ? event.notice_id
       : `INTERACTION_CREATE:${event.notice_id}`
@@ -1658,7 +2174,7 @@ const adapter = new class QQBotAdapter {
       message_id: event.notice_id || event.event_id,
       message_type: event.notice_type,
       sub_type: 'callback',
-      get user_id () { return this.sender.user_id },
+      get user_id() { return this.sender.user_id },
       sender: { user_id: `${id}${this.sep}${event.operator_id}` },
       message: [],
       raw_message: ''
@@ -1701,7 +2217,8 @@ const adapter = new class QQBotAdapter {
         Bot.makeLog('info', [`好友按钮点击事件：[${data.user_id}]`, data.raw_message], data.self_id)
         data.reply = msg => this.sendFriendMsg(
           { ...data, user_id: event.operator_id },
-          wrapWithEventId(msg)
+          wrapWithEventId(msg),
+          { event_id: `event_${interactionEventId}` }
         )
         await this.setFriendMap(data)
         break
@@ -1710,7 +2227,8 @@ const adapter = new class QQBotAdapter {
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
         data.reply = msg => this.sendGroupMsg(
           { ...data, group_id: event.group_id },
-          wrapWithEventId(msg)
+          wrapWithEventId(msg),
+          { event_id: `event_${interactionEventId}` }
         )
         await this.setGroupMap(data)
         break
@@ -1752,7 +2270,7 @@ const adapter = new class QQBotAdapter {
                 msg = i
               }
               if (msg?.length > 0) {
-                  this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
+                this.sendMsg(data, msg => data.bot.sdk.sendGroupMessage(event.group_id, msg), msg)
               }
             })
           }

@@ -31,6 +31,10 @@ let { config, configSave } = await makeConfig('QQBot', {
   markdownImgScale: 1.0,
   sep: '',
   TextChains: false,
+  stream: false,
+  smallbtn: false,
+  chunkSize: 2,
+  delay: 100,
   bot: {
     sandbox: false,
     maxRetry: Infinity,
@@ -44,7 +48,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   ]
 })
 
-function refConfig () {
+function refConfig() {
   config = YAML.parse(fs.readFileSync('config/QQBot.yaml', 'utf-8'))
 }
 
