@@ -86,6 +86,15 @@ function enhanceWsAndBotInfo(sessionManager, isSdk12 = false) {
   }
 }
 
+function enhanceSdk3Events() {
+  try {
+    const eventModule = require('qq-official-bot/lib/event/index.js')
+    const messageModule = require('qq-official-bot/lib/event/message.js')
+    eventModule.QQEvent.GROUP_MESSAGE_CREATE = 'message.group'
+    eventModule.EventParserMap.set(eventModule.QQEvent.GROUP_MESSAGE_CREATE, messageModule.MessageEvent.parse)
+  } catch (e) {}
+}
+
 function enhanceSdk3(sdk) {
   const originalConstructor = Object.getPrototypeOf(sdk).constructor
   Object.getPrototypeOf(sdk).constructor = function(opts) {
@@ -101,6 +110,7 @@ function enhanceSdk3(sdk) {
   }
 
   enhanceWsAndBotInfo(sdk.sessionManager, false)
+  enhanceSdk3Events()
 
   const originalCheckNeedToRestart = sdk.sessionManager.checkNeedToRestart.bind(sdk.sessionManager)
   sdk.sessionManager.checkNeedToRestart = async function() {
