@@ -2060,14 +2060,6 @@ const adapter = new class QQBotAdapter {
     await this.setGroupMap(data)
   }
 
-  async makeAuditMessage(data, event) {
-    data.group_id = `${data.self_id}${this.sep}${event.group_id}`
-    // 自定义消息过滤前台日志防刷屏(自欺欺人大法)
-    const filterLog = config.filterLog?.[data.self_id] || []
-    let logStat = filterLog.includes(_.trim(data.raw_message)) ? 'debug' : 'info'
-    Bot.makeLog(logStat, [`消息审核${event.sub_type === 'pass' ? '通过' : '不通过'}`, event], data.self_id)
-  }
-
   async setFriendMap(data) {
     if (!data.user_id) return
     await data.bot.fl.set(data.user_id, {
@@ -2102,6 +2094,7 @@ const adapter = new class QQBotAdapter {
       logger.debug(`过滤bot信息,event:${JSON.stringify(event, null, 2)}`)
       return true
     }
+
     const data = {
       raw: event,
       bot: Bot[id],
@@ -2113,6 +2106,12 @@ const adapter = new class QQBotAdapter {
       get user_id() { return this.sender.user_id },
       message: this.normalizeSdkMessage(event.message),
       raw_message: event.raw_message
+    }
+
+    if (event.message_type == 'audit.pass') {
+      Bot.makeLog('info', [`群主动消息审核：[${id}${this.sep}${event.group_openid}]`, event.sub_type], event.self_id)
+      Bot.em(`${event.post_type}.${event.message_type}.${event.sub_type}`, data)
+      return
     }
 
     for (const i of data.message) {
@@ -2136,9 +2135,6 @@ const adapter = new class QQBotAdapter {
       case 'group':
         await this.makeGroupMessage(data, event)
         break
-      case 'audit':
-        await this.makeAuditMessage(data, event)
-        break
       case 'guild':
         await this.makeGuildMessage(data, event)
         if (data.message.length === 0) {
@@ -2146,7 +2142,7 @@ const adapter = new class QQBotAdapter {
         }
         break
       default:
-        Bot.makeLog('warn', ['未知消息', event], id)
+        Bot.makeLog('warn', ['未知消息', data.message_type, data.sub_type, event], id)
         return
     }
 
@@ -2832,7 +2828,7 @@ export class QQBotAdapter extends plugin {
     await configSave()
     this.reply(msg, true)
   }
-  
+
   async turn_filter_bot(e) {
     if (e.msg.includes('开启')) {
       config.filter_bot_msg = true
