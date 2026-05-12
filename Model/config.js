@@ -21,7 +21,7 @@ let { config, configSave } = await makeConfig('QQBot', {
     template: 'abcdefghij'
   },
   keyboard: {},  // 按钮模板ID映射，格式如："3889001286": "102076896_1763887100"
-
+  filter_bot_msg: false,
   sendButton: false,
   customMD: {},
   mdSuffix: {},

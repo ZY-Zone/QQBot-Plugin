@@ -2060,6 +2060,14 @@ const adapter = new class QQBotAdapter {
     await this.setGroupMap(data)
   }
 
+  async makeAuditMessage(data, event) {
+    data.group_id = `${data.self_id}${this.sep}${event.group_id}`
+    // 自定义消息过滤前台日志防刷屏(自欺欺人大法)
+    const filterLog = config.filterLog?.[data.self_id] || []
+    let logStat = filterLog.includes(_.trim(data.raw_message)) ? 'debug' : 'info'
+    Bot.makeLog(logStat, [`消息审核${event.sub_type === 'pass' ? '通过' : '不通过'}`, event], data.self_id)
+  }
+
   async setFriendMap(data) {
     if (!data.user_id) return
     await data.bot.fl.set(data.user_id, {
@@ -2090,6 +2098,10 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeMessage(id, event) {
+    if (event.author?.bot && config.filter_bot_msg) {
+      logger.debug(`过滤bot信息,event:${JSON.stringify(event, null, 2)}`)
+      return true
+    }
     const data = {
       raw: event,
       bot: Bot[id],
@@ -2123,6 +2135,9 @@ const adapter = new class QQBotAdapter {
         break
       case 'group':
         await this.makeGroupMessage(data, event)
+        break
+      case 'audit':
+        await this.makeAuditMessage(data, event)
         break
       case 'guild':
         await this.makeGuildMessage(data, event)
@@ -2610,7 +2625,8 @@ const setMap = {
   转图片: 'toImg',
   调用统计: 'callStats',
   用户统计: 'userStats',
-  文字链: 'TextChains'
+  文字链: 'TextChains',
+  机器人消息过滤: 'filter_bot_msg'
 }
 
 export class QQBotAdapter extends plugin {
@@ -2679,6 +2695,11 @@ export class QQBotAdapter extends plugin {
           reg: /^#[Qq]+[Bb]ot一键群发$/i,
           fnc: 'oneKeySendGroupMsg',
           permission: config.permission
+        },
+        {
+          reg: '^#(开启|关闭)([Bb][Oo][Tt]|机器人)(消息)?过滤$',
+          fnc: 'turn_filter_bot',
+          permission: config.permission,
         }
       ]
     })
@@ -2701,6 +2722,9 @@ export class QQBotAdapter extends plugin {
       [
         { text: `${config.callStats ? '关闭' : '开启'}调用统计`, callback: `#QQBot设置调用统计${config.callStats ? '关闭' : '开启'}` },
         { text: `${config.userStats ? '关闭' : '开启'}用户统计`, callback: `#QQBot设置用户统计${config.userStats ? '关闭' : '开启'}` }
+      ],
+      [
+        { text: `${config.filter_bot_msg ? '关闭' : '开启'}机器人消息过滤`, callback: `#QQBot设置机器人消息过滤${config.filter_bot_msg ? '关闭' : '开启'}` }
       ]
     )])
   }
@@ -2807,6 +2831,20 @@ export class QQBotAdapter extends plugin {
     config.filterLog[this.e.self_id] = filterLog
     await configSave()
     this.reply(msg, true)
+  }
+  
+  async turn_filter_bot(e) {
+    if (e.msg.includes('开启')) {
+      config.filter_bot_msg = true
+      await configSave()
+      return this.reply('开启bot消息过滤成功')
+    }
+    if (e.msg.includes('关闭')) {
+      config.filter_bot_msg = false
+      await configSave()
+      return this.reply('关闭bot消息过滤成功')
+    }
+    return this.reply('修改失败')
   }
 
   async oneKeySendGroupMsg() {
