@@ -92,6 +92,16 @@ function enhanceSdk3Events() {
     const messageModule = require('qq-official-bot/lib/event/message.js')
     eventModule.QQEvent.GROUP_MESSAGE_CREATE = 'message.group'
     eventModule.EventParserMap.set(eventModule.QQEvent.GROUP_MESSAGE_CREATE, messageModule.MessageEvent.parse)
+    
+    const originalMessageEventParse = messageModule.MessageEvent.parse
+    messageModule.MessageEvent.parse = function(event, payload) {
+      const mentions = payload.mentions
+      const result = originalMessageEventParse.call(this, event, payload)
+      if (mentions && result) {
+        result.mentions = mentions
+      }
+      return result
+    }
   } catch (e) {}
 }
 
@@ -375,6 +385,24 @@ function enhanceSdk12(sdk) {
       else if (event.includes('reply.delete')) sdk.emit('FORUM_REPLY_DELETE', payload)
     })
   }
+
+  try {
+    const eventModule = require('qq-official-bot/lib/events/index.js')
+    const messageModule = require('qq-official-bot/lib/events/message.js')
+    
+    eventModule.QQEvent.GROUP_MESSAGE_CREATE = 'message.group'
+    eventModule.EventParserMap.set(eventModule.QQEvent.GROUP_MESSAGE_CREATE, messageModule.MessageEvent.parse)
+    
+    const originalMessageEventParse = messageModule.MessageEvent.parse
+    messageModule.MessageEvent.parse = function(event, payload) {
+      const mentions = payload.mentions
+      const result = originalMessageEventParse.call(this, event, payload)
+      if (mentions && result) {
+        result.mentions = mentions
+      }
+      return result
+    }
+  } catch (e) {}
 
   let MessageBuilder
   try {

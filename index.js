@@ -1983,6 +1983,7 @@ const adapter = new class QQBotAdapter {
     }
 
     data.msg_elements = event.msg_elements || []
+    data.mentions = event.mentions || []
 
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
