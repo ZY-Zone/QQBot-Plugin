@@ -1983,8 +1983,24 @@ const adapter = new class QQBotAdapter {
     }
 
     data.msg_elements = event.msg_elements || []
+
+    data.reply_user = event.msg_elements?.[0]?.author || {}
+
     data.mentions = event.mentions || []
 
+    let atUser = data.mentions.length ? [...data.mentions].reverse().find(m => !m.bot) : null
+
+    if (!atUser && data.mentions.length) {
+        atUser = data.mentions.at(-1);
+    }
+
+    data.at = data.mentions.length ? data.mentions.slice().reverse().find(m => !m.bot)?.member_openid || data.mentions.at(-1)?.member_openid : null
+
+    data.at = data.at ? `${data.self_id}:${data.at}` : null
+
+    data.atall = data.mentions.some(m => m.scope === 'all')
+
+    data.atme = !!(data.at &&  atUser?.is_you)
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
       const user_id = await Handler.call('ws.tool.findUserId', { user_id: data.user_id })
@@ -2092,8 +2108,10 @@ const adapter = new class QQBotAdapter {
 
   async makeMessage(id, event) {
     if (event.author?.bot && config.filter_bot_msg) {
-      logger.debug(`过滤bot信息,event:${JSON.stringify(event, null, 2)}`)
-      return true
+      // 发送方本身是机器人，直接丢弃
+      if (event.author?.bot) return true
+      // 消息里 @ 了别的机器人（bot=true 且不是当前 Bot），丢弃
+      if (Array.isArray(event.mentions) && event.mentions.some(m => m?.bot === true && m?.is_you !== true)) return true
     }
 
     const data = {
@@ -2111,7 +2129,13 @@ const adapter = new class QQBotAdapter {
 
     if (event.message_type == 'audit.pass') {
       Bot.makeLog('info', [`群主动消息审核：[${id}${this.sep}${event.group_openid}]`, event.sub_type], event.self_id)
-      Bot.em(`${event.post_type}.${event.message_type}.${event.sub_type}`, data)
+      Bot.em(`notice.audit.${event.sub_type}`, {
+        ...event,
+        self_id: id,
+        bot: Bot[id],
+        post_type: 'notice',
+        notice_type: 'audit'
+      })
       return
     }
 
@@ -2128,6 +2152,7 @@ const adapter = new class QQBotAdapter {
       case 'private':
       case 'direct':
         if (data.sub_type == 'friend') {
+          await data.bot.sdk.sendFriendInputNotify(event.sender?.user_id, 1, 30, data.message_id)
           await this.makeFriendMessage(data, event)
         } else {
           await this.makeDirectMessage(data, event)
@@ -2464,7 +2489,7 @@ const adapter = new class QQBotAdapter {
       mode: 'websocket'
     }
 
-    if (Number(token[4])) opts.intents.push('GROUP_AT_MESSAGE_CREATE', 'C2C_MESSAGE_CREATE')
+    if (Number(token[4])) opts.intents.push('GROUP_AND_C2C_EVENT')
 
     if (Number(token[5])) opts.intents.push('GUILD_MESSAGES')
     else opts.intents.push('PUBLIC_GUILD_MESSAGES')
@@ -2474,13 +2499,13 @@ const adapter = new class QQBotAdapter {
       sdk: enhanceSDK(new QQBot(opts)),
       login() {
         return new Promise(resolve => {
-          this.sdk.sessionManager.once('READY', resolve)
+          this.sdk.receiver.once("ready", resolve)
           this.sdk.start()
         })
       },
       logout() {
         return new Promise(resolve => {
-          this.sdk.ws.once('close', resolve)
+          this.sdk.receiver.once("close", resolve)
           this.sdk.stop()
         })
       },

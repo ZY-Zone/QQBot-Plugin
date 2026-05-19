@@ -34,15 +34,15 @@ export function getSDKVersion() {
 }
 
 export function isSdk12() {
-  const version = getSDKVersion()
+  // const version = getSDKVersion()
   
-  const parts = version.split('.').map(Number)
-  const target = [1, 0, 12]
+  // const parts = version.split('.').map(Number)
+  // const target = [1, 0, 12]
   
-  for (let i = 0; i < 3; i++) {
-    if (parts[i] > target[i]) return true
-    if (parts[i] < target[i]) return false
-  }
+  // for (let i = 0; i < 3; i++) {
+  //   if (parts[i] > target[i]) return true
+  //   if (parts[i] < target[i]) return false
+  // }
   return true
 }
 
@@ -321,14 +321,14 @@ function enhanceSdk12(sdk) {
           if (refreshTime > 0) {
             this.refreshTimer = setTimeout(async () => {
               try {
-                this.logger.debug("[AUTH] 自动刷新访问令牌")
+                this.bot.logger.debug("[AUTH] 自动刷新访问令牌")
                 await this.refreshAccessToken()
               } catch (error) {
-                this.logger.error("[AUTH] 自动刷新令牌失败:", error)
+                this.bot.logger.error("[AUTH] 自动刷新令牌失败:", error)
                 setTimeout(() => this.scheduleTokenRefresh(), 10000)
               }
             }, refreshTime)
-            this.logger.debug(`[AUTH] 令牌刷新已计划，将在 ${refreshTime / 1000} 秒后执行`)
+            this.bot.logger.debug(`[AUTH] 令牌刷新已计划，将在 ${refreshTime / 1000} 秒后执行`)
           }
         }
       }
@@ -389,6 +389,7 @@ function enhanceSdk12(sdk) {
   try {
     const eventModule = require('qq-official-bot/lib/events/index.js')
     const messageModule = require('qq-official-bot/lib/events/message.js')
+    const clientModule = require('qq-official-bot/lib/client.js')
     
     eventModule.QQEvent.GROUP_MESSAGE_CREATE = 'message.group'
     eventModule.EventParserMap.set(eventModule.QQEvent.GROUP_MESSAGE_CREATE, messageModule.MessageEvent.parse)
@@ -401,6 +402,18 @@ function enhanceSdk12(sdk) {
         result.mentions = mentions
       }
       return result
+    }
+    
+    clientModule.Client.prototype.removeAt = function(payload) {
+      if (this.config.removeAt === false)
+        return
+      let content = payload.content
+      payload.mentions?.forEach((mention) => {
+        if (mention?.id) {
+          content = content.replace(new RegExp(`<@!?${mention.id}>\s*`, 'g'), '')
+        }
+      })
+      payload.content = content.trimStart()
     }
   } catch (e) {}
 
@@ -442,7 +455,10 @@ function enhanceSdk12(sdk) {
         buildResult.messagePayload.is_wakeup = true
       }
       
-      if (buildResult.isFile) return await this.sendFile(endpointPath, buildResult)
+      if (buildResult.isFile) {
+        buildResult.messagePayload.media = await this.uploadFile(endpointPath, buildResult)
+      }
+      
       return await this.sendRegularMessage(endpointPath, buildResult, options)
     }
   }
@@ -538,23 +554,21 @@ function enhanceSdk12(sdk) {
       }
     }
     
-    if (MessageBuilder) {
-      this.logger?.debug('[SDK12 sendPrivateMessage] 使用 MessageBuilder')
-      const messageBuilder = new MessageBuilder(this.appid, false, source)
-      const buildResult = await messageBuilder.build(message)
-      this.logger?.debug('[SDK12 sendPrivateMessage] buildResult:', JSON.stringify(buildResult, null, 2))
-      const endpointPath = `/v2/users/${user_id}`
-      
-      if (buildResult.isFile) {
-        return await this.sendFile(endpointPath, buildResult)
-      }
-      return await this.sendRegularMessage(endpointPath, buildResult, options)
-    } else {
+    if (this.messageService) {
+      this.logger?.debug('[SDK12 sendPrivateMessage] 使用 messageService.sendPrivateMessage')
+      return await this.messageService.sendPrivateMessage(user_id, message, source, options)
+    }
+    
+    try {
       this.logger?.debug('[SDK12 sendPrivateMessage] 回退使用 Sender')
+      const Sender = require('qq-official-bot/lib/entries/sender.js').Sender
       const sender = new Sender(this, `/v2/users/${user_id}`, message, source)
       const result = await sender.sendMsg()
       this.logger?.info(`send to User(${user_id}): ${sender.brief}`)
       return result
+    } catch (e) {
+      this.logger?.error('[SDK12 sendPrivateMessage] 发送失败:', e)
+      throw e
     }
   }
 
