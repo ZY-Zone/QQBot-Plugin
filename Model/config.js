@@ -24,6 +24,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   filter_bot_msg: false,
   sendButton: false,
   customMD: {},
+  getAt: true,
   mdSuffix: {},
   btnSuffix: {},
   filterLog: {},

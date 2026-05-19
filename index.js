@@ -1959,7 +1959,7 @@ const adapter = new class QQBotAdapter {
 
     data.msg_elements = event.msg_elements || []
 
-    data.sendInputNotify = input_second => data.bot.sdk.sendFriendInputNotify(data.openid, 1, input_second || 30, data.message_id)
+    data.sendInputNotify = input_second => data.bot.sendFriendInputNotify(data.openid, 1, input_second || 30, data.message_id)
 
     data.reply = msg =>
       this.sendFriendMsg({ ...data, user_id: event.sender.user_id }, msg, { id: data.message_id })
@@ -1993,14 +1993,14 @@ const adapter = new class QQBotAdapter {
     if (!atUser && data.mentions.length) {
         atUser = data.mentions.at(-1);
     }
+    
+    if (config.getAt) {
+      data.at = data.mentions.length ? data.mentions.slice().reverse().find(m => !m.bot)?.member_openid || data.mentions.at(-1)?.member_openid : null
+      data.at = data.at ? `${data.self_id}:${data.at}` : null
+      data.atall = data.mentions.some(m => m.scope === 'all')
+      data.atme = !!(data.at &&  atUser?.is_you)
+    }
 
-    data.at = data.mentions.length ? data.mentions.slice().reverse().find(m => !m.bot)?.member_openid || data.mentions.at(-1)?.member_openid : null
-
-    data.at = data.at ? `${data.self_id}:${data.at}` : null
-
-    data.atall = data.mentions.some(m => m.scope === 'all')
-
-    data.atme = !!(data.at &&  atUser?.is_you)
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
       const user_id = await Handler.call('ws.tool.findUserId', { user_id: data.user_id })
@@ -2152,7 +2152,7 @@ const adapter = new class QQBotAdapter {
       case 'private':
       case 'direct':
         if (data.sub_type == 'friend') {
-          await data.bot.sdk.sendFriendInputNotify(event.sender?.user_id, 1, 30, data.message_id)
+          await data.bot.sendFriendInputNotify(event.sender?.user_id, 1, 30, data.message_id)
           await this.makeFriendMessage(data, event)
         } else {
           await this.makeDirectMessage(data, event)
@@ -2549,6 +2549,16 @@ const adapter = new class QQBotAdapter {
       async getChannelThreadInfo(channel_id, thread_id) {
         const { data: result } = await this.sdk.request.get(`/channels/${channel_id}/threads/${thread_id}`)
         return result
+      },
+
+      // 设置私聊输入状态
+      async sendFriendInputNotify(user_id, input_type, input_second, msg_id) {
+        const result = await this.sdk.request.post(`/v2/users/${user_id}/messages`, {
+          msg_type: 6,
+          input_notify: { input_type, input_second },
+          msg_id
+        })
+        return result.data?.ext_info || { ref_idx: '' }
       },
 
       callback: {}
