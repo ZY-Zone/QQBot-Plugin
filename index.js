@@ -2152,7 +2152,6 @@ const adapter = new class QQBotAdapter {
       case 'private':
       case 'direct':
         if (data.sub_type == 'friend') {
-          await data.bot.sendFriendInputNotify(event.sender?.user_id, 1, 30, data.message_id)
           await this.makeFriendMessage(data, event)
         } else {
           await this.makeDirectMessage(data, event)
