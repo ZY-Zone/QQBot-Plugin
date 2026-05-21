@@ -207,6 +207,7 @@ const adapter = new class QQBotAdapter {
 
   async uploadToTencentCOS(buffer) {
     try {
+      if (!config.tencentCOS) return null
       const fetchImpl = typeof fetch !== 'undefined' ? fetch : await import('node-fetch').then(module => module.default);
       const getResponse = await fetchImpl(`https://ci-exhibition.cloud.tencent.com/samples/createUploadKey?ext=png&ciProcess=sensitive-content-recognition`, {
         method: 'GET',

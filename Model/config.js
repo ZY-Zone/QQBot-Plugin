@@ -15,6 +15,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   imageLength: 3,
   toQQUin: false,
   toImg: false,
+  tencentCOS: true,
   callStats: false,
   userStats: false,
   markdown: {
