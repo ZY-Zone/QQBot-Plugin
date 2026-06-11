@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import imageSize from 'image-size'
 import { randomUUID } from 'node:crypto'
 import { encode as encodeSilk, isSilk } from 'silk-wasm'
-import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating } from './Model/index.js'
+import { Dau, importJS, Runtime, Handler, config, configSave, refConfig, splitMarkDownTemplate, getMustacheTemplating, formatDuration, inviteStore } from './Model/index.js'
 import { Bot as QQBot } from 'qq-official-bot'
 import { enhanceSDK, isSdk12, getSDKVersion } from './Model/sdkEnhancer.js'
 import { qrRegister, generateQRCode, BindStatus } from './Model/qr-auth.js'
@@ -26,6 +26,296 @@ if (config.imageLength) try {
 } catch (err) {
   Bot.makeLog("error", ["sharp 导入错误，图片压缩关闭", err], "QQBot-Plugin")
 }
+
+// ========== QQBot 错误分类系统 ==========
+function getQQBotAuthError(data) {
+  const code = Number(data?.code || data?.err_code)
+  const message = String(data?.message || data?.msg || data || '')
+  if (code === 100016) return 'secret输入错误'
+  if (code === 10004) return 'appid输入错误'
+  if (code === 100007) return '机器人被封禁/不存在'
+  if (message.includes('code(100016)')) return 'secret输入错误'
+  if (message.includes('code(10004)')) return 'appid输入错误'
+  if (message.includes('code(100007)')) return '机器人被封禁/不存在'
+  return ''
+}
+
+function isQQBotReadOnlyError(data) {
+  const message = String(data?.message || data?.msg || data || '')
+  return Number(data?.code || data?.err_code) === 11300 || message.includes('code(11300)') || message.includes('link type check failed')
+}
+
+function isQQBotCanceledError(data) {
+  const message = String(data?.message || data?.msg || data || '')
+  return Number(data?.code || data?.err_code) === 11700 || message.includes('code(11700)') || message.includes('robot has canceled')
+}
+
+function isQQBotRateLimitError(data) {
+  const message = String(data?.message || data?.msg || data || '')
+  return Number(data?.code || data?.err_code) === 100017 || message.includes('code(100017)') || message.includes('接口调用超过频率限制')
+}
+
+function isQQBotSdkError(data) {
+  const message = String(data?.message || data?.msg || data?.stack || data || '')
+  return message.includes('request "') || message.includes('qq-official-bot') || message.includes('/gateway/bot')
+}
+
+function isQQBotNoOfficialWsError(data) {
+  return String(data?.message || data?.msg || data || '').includes('4925')
+}
+
+function getQQBotFatalWsErrorText(data) {
+  const message = String(data?.message || data?.msg || data || '')
+  if (message.includes('4925')) return '官方 websocket 不可用，请解绑元器'
+  if (message.includes('4903')) return '机器人停止服务(被回收)，请重新提审'
+  return ''
+}
+
+async function validateQQBotToken(tokenText) {
+  const parts = String(tokenText || '').split(':')
+  const [selfId, appid, token, secret, sandboxRaw, intentRaw] = parts
+  if (!selfId || !appid || !secret || parts.length < 6) return { ok: false, error: '配置格式错误' }
+  const sandbox = sandboxRaw === '1'
+  try {
+    const tokenRes = await fetch('https://bots.qq.com/app/getAppAccessToken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appId: appid, clientSecret: secret })
+    })
+    const tokenData = await tokenRes.json()
+    const accessToken = tokenData?.access_token
+    if (!accessToken) return { ok: false, error: getQQBotAuthError(tokenData) || 'secret验证失败' }
+    const apiBase = sandbox ? 'https://sandbox.api.sgroup.qq.com' : 'https://api.sgroup.qq.com'
+    const meRes = await fetch(`${apiBase}/users/@me`, {
+      headers: { Authorization: `QQBot ${accessToken}`, 'X-Union-Appid': appid }
+    })
+    const me = await meRes.json()
+    return { ok: true, selfId, appid, token, secret, sandbox, intentRaw, me }
+  } catch (err) {
+    return { ok: false, error: getQQBotAuthError(err) || err.message || 'secret验证失败' }
+  }
+}
+// ========== 错误分类系统结束 ==========
+
+// ========== Per-bot 配置系统 ==========
+const PER_BOT_CONFIG_KEYS = ['toQRCode', 'toCallback', 'toBotUpload', 'forceSilk', 'toQQUin', 'toImg', 'callStats', 'userStats', 'offlineDetect']
+
+function ensureBotConfig(selfId = '') {
+  if (!config.bots || typeof config.bots !== 'object' || Array.isArray(config.bots)) config.bots = {}
+  const key = selfId || 'default'
+  if (!config.bots[key] || typeof config.bots[key] !== 'object') config.bots[key] = {}
+  const botConfig = config.bots[key]
+  for (const cfgKey of PER_BOT_CONFIG_KEYS) {
+    if (typeof botConfig[cfgKey] === 'undefined' && typeof config[cfgKey] !== 'undefined') {
+      botConfig[cfgKey] = cfgKey === 'offlineDetect' ? { ...(config[cfgKey] || {}) } : config[cfgKey]
+    }
+  }
+  if (!botConfig.offlineDetect || typeof botConfig.offlineDetect !== 'object') botConfig.offlineDetect = { ...(config.offlineDetect || {}) }
+  return botConfig
+}
+
+function getBotConfigValue(selfId, key) {
+  const botConfig = ensureBotConfig(selfId)
+  return typeof botConfig[key] === 'undefined' ? config[key] : botConfig[key]
+}
+
+function setBotConfigValue(selfId, key, value) {
+  const botConfig = ensureBotConfig(selfId)
+  botConfig[key] = value
+}
+
+function getOfflineDetectConfig(selfId = '') {
+  return ensureBotConfig(selfId).offlineDetect || {}
+}
+
+function getQRCodeRegExp(selfId = '') {
+  const toQRCode = getBotConfigValue(selfId, 'toQRCode')
+  if (toQRCode === false) return false
+  if (toQRCode === 'url') return false
+  if (typeof toQRCode === 'string') return new RegExp(toQRCode, 'g')
+  return /(?<!\[(.*?)\]\()https?:\/\/[-\w_]+(\.[-\w_]+)+([-\w.,@?^=%&:/~+#]*[-\w@?^=%&/~+#])?/g
+}
+// ========== Per-bot 配置系统结束 ==========
+
+// ========== 召回/破冰配置 ==========
+function ensureRecallConfig(selfId = '') {
+  if (!config.recall || typeof config.recall !== 'object') config.recall = {}
+  if (!config.recall.bots || typeof config.recall.bots !== 'object') config.recall.bots = {}
+  const key = selfId || 'default'
+  if (!config.recall.bots[key] || typeof config.recall.bots[key] !== 'object') config.recall.bots[key] = {}
+  const rc = config.recall.bots[key]
+  if (typeof rc.markdown !== 'string') rc.markdown = ''
+  if (typeof rc.buttonEnabled !== 'boolean') rc.buttonEnabled = false
+  if (!rc.button || typeof rc.button !== 'object') rc.button = null
+  if (typeof rc.batchCount !== 'number') rc.batchCount = 0
+  return rc
+}
+// ========== 召回配置结束 ==========
+
+// ========== Claw 配置交互 ==========
+const CLAW_DEFAULT_CFG = {
+  channel_type: 'qqbot',
+  channel_ver: '1.7.1',
+  claw_type: 'openclaw',
+  claw_ver: '2026.3.24',
+  require_mention: 'mention',
+  group_policy: 'open',
+  mention_patterns: '机器人, 助手',
+  online_state: 'offline'
+}
+
+function ensureClawConfig(selfId = '') {
+  if (!config.claw || typeof config.claw !== 'object') config.claw = {}
+  if (!config.claw.bots || typeof config.claw.bots !== 'object') config.claw.bots = {}
+  const key = selfId || 'default'
+  if (!config.claw.bots[key] || typeof config.claw.bots[key] !== 'object') config.claw.bots[key] = {}
+  const claw = config.claw.bots[key]
+  if (typeof claw.online !== 'boolean') claw.online = false
+  if (typeof claw.code !== 'string') claw.code = String(claw.code ?? '0')
+  if (!claw.json || typeof claw.json !== 'object' || Array.isArray(claw.json)) claw.json = {}
+  return claw
+}
+
+function getClawCfg(selfId = '') {
+  const claw = ensureClawConfig(selfId)
+  return { ...CLAW_DEFAULT_CFG, ...claw.json, online_state: claw.online ? 'online' : 'offline' }
+}
+// ========== Claw 配置交互结束 ==========
+
+// ========== 掉线检测系统 ==========
+const offlineCheckState = { timers: {}, retrying: {}, waitingReset: {} }
+
+function clearRuntimeTimers(target, seen = new Set()) {
+  if (!target || typeof target !== 'object' || seen.has(target)) return
+  seen.add(target)
+  for (const [key, value] of Object.entries(target)) {
+    if (/timer|timeout|interval|heartbeat|reconnect/i.test(key)) {
+      if (value) { try { clearTimeout(value) } catch {} try { clearInterval(value) } catch {} }
+      try { target[key] = null } catch {}
+    }
+  }
+}
+
+async function getSessionInfo(id) {
+  try {
+    const { data } = await Bot[id].sdk.request.get('/gateway/bot')
+    return data?.session_start_limit || null
+  } catch (err) {
+    Bot.makeLog('debug', [`[${id}] 获取 Session 信息失败`, err.message], id)
+    return null
+  }
+}
+
+async function doOfflineCheck(adapter, id) {
+  if (Bot[id]?.disabledRuntime) return
+  if (offlineCheckState.retrying[id] || offlineCheckState.waitingReset[id]) return
+  if (!Bot[id]) return
+
+  const offlineDetect = getOfflineDetectConfig(id)
+  const sessionInfo = await getSessionInfo(id)
+  if (!sessionInfo) return
+
+  Bot.makeLog('debug', [`[${id}] Session 检测结果`, sessionInfo], id)
+
+  if (sessionInfo.remaining === 0) {
+    const resetMs = Number(sessionInfo.reset_after) || 0
+    const resetStr = formatDuration(resetMs, 'milliseconds')
+    Bot.makeLog('warn', [`[${id}] Session remaining=0，主动断开连接，将在 ${resetStr} 后自动重连`], id)
+
+    try { await Bot[id].logout() } catch {}
+
+    if (offlineDetect.notify) {
+      try { await Bot.sendMasterMsg(`[${id}] 账号下线：Session 配额耗尽，将在 ${resetStr} 后自动重连`) } catch {}
+    }
+
+    if (offlineDetect.autoReconnect && resetMs > 0) {
+      offlineCheckState.waitingReset[id] = setTimeout(async () => {
+        delete offlineCheckState.waitingReset[id]
+        await doReconnect(adapter, id)
+      }, resetMs)
+    }
+  }
+}
+
+async function doReconnect(adapter, id, retryCount = 0) {
+  if (Bot[id]?.disabledRuntime) return
+  if (offlineCheckState.retrying[id]) return
+  offlineCheckState.retrying[id] = true
+
+  const offlineDetect = getOfflineDetectConfig(id)
+  const maxRetries = 10
+  const retryDelay = Math.min(30000, 5000 * (retryCount + 1))
+
+  Bot.makeLog('warn', [`[${id}] 开始自动重连... (第 ${retryCount + 1} 次尝试)`], id)
+
+  try {
+    const bot = Bot[id]
+    if (!bot) return
+
+    if (bot.heartbeatTimer) { clearTimeout(bot.heartbeatTimer); bot.heartbeatTimer = null }
+
+    try { await bot.logout() } catch {}
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    await bot.login()
+    Bot.makeLog('warn', [`[${id}] 重新登录成功`], id)
+
+    offlineCheckState.retrying[id] = false
+    Bot.makeLog('warn', [`[${id}] 自动重连成功`], id)
+
+    if (offlineDetect.notify) {
+      try { await Bot.sendMasterMsg(`[${id}] 账号重连成功！`) } catch {}
+    }
+  } catch (err) {
+    Bot.makeLog('error', [`[${id}] 自动重连失败 (第 ${retryCount + 1} 次)`, err.message], id)
+    if (retryCount + 1 < maxRetries) {
+      offlineCheckState.waitingReset[id] = setTimeout(async () => {
+        delete offlineCheckState.waitingReset[id]
+        await doReconnect(adapter, id, retryCount + 1)
+      }, retryDelay)
+      return
+    } else {
+      Bot.makeLog('error', [`[${id}] 重连失败次数已达上限 (${maxRetries})，停止重试`], id)
+      if (offlineDetect.notify) {
+        try { await Bot.sendMasterMsg(`[${id}] 自动重连失败：已达最大重试次数，请手动处理`) } catch {}
+      }
+    }
+  } finally {
+    if (!offlineCheckState.waitingReset[id]) {
+      offlineCheckState.retrying[id] = false
+    }
+  }
+}
+
+function disableBotRuntime(adapter, id, reason = '') {
+  if (offlineCheckState.timers[id]) { clearInterval(offlineCheckState.timers[id]); delete offlineCheckState.timers[id] }
+  if (offlineCheckState.waitingReset[id]) { clearTimeout(offlineCheckState.waitingReset[id]); delete offlineCheckState.waitingReset[id] }
+  delete offlineCheckState.retrying[id]
+  const bot = Bot[id]
+  if (!bot || bot.disabledRuntime) return
+  bot.disabledRuntime = true
+  try { bot.sdk.sessionManager.getAccessToken = async () => ({ access_token: '', expires_in: '0' }) } catch {}
+  try { bot.sdk.sessionManager.getWsUrl = async () => '' } catch {}
+  try { bot.sdk.start = async () => false } catch {}
+  try { bot.sdk.sessionManager?.removeAllListeners?.() } catch {}
+  try { clearRuntimeTimers(bot.sdk.sessionManager) } catch {}
+  try { clearRuntimeTimers(bot.sdk) } catch {}
+  try { bot.sdk?.ws?.removeAllListeners?.() } catch {}
+  try { bot.sdk?.ws?.close?.() } catch {}
+  try { bot.sdk?.stop?.() } catch {}
+  Bot.makeLog('error', [`[${id}] 已停止该机器人运行态${reason ? `：${reason}` : ''}，配置未删除，重启后会按配置重新尝试连接`], id)
+}
+
+function startOfflineCheck(adapter, id) {
+  if (Bot[id]?.disabledRuntime) return
+  if (offlineCheckState.timers[id]) { clearInterval(offlineCheckState.timers[id]) }
+  const offlineDetect = getOfflineDetectConfig(id)
+  if (!offlineDetect.enabled) return
+  const intervalMin = Math.max(1, Math.min(30, Number(offlineDetect.interval) || 5))
+  const intervalMs = intervalMin * 60 * 1000
+  Bot.makeLog('info', [`[${id}] 启动掉线检测，间隔 ${intervalMin} 分钟`], id)
+  offlineCheckState.timers[id] = setInterval(() => doOfflineCheck(adapter, id), intervalMs)
+}
+// ========== 掉线检测系统结束 ==========
 
 function pickImageSizeOptions(options) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) return false
@@ -69,6 +359,22 @@ function patchSegmentImageSizeOptions() {
 }
 
 patchSegmentImageSizeOptions()
+
+// 扩展 segment.file 支持 force_chunk 和 recall_time 参数
+const originalSegmentFile = segment.file.bind(segment)
+segment.file = function (file, name, forceChunk, recallTime) {
+  let result
+  if (typeof file === 'object' && file !== null && !Buffer.isBuffer(file)) {
+    result = originalSegmentFile(file)
+    if (typeof file.force_chunk !== 'undefined') result.force_chunk = file.force_chunk
+    if (typeof file.recall_time !== 'undefined') result.recall_time = file.recall_time
+  } else {
+    result = originalSegmentFile(file, name)
+    if (typeof forceChunk !== 'undefined') result.force_chunk = forceChunk
+    if (typeof recallTime !== 'undefined') result.recall_time = recallTime
+  }
+  return result
+}
 
 const adapter = new class QQBotAdapter {
   constructor() {
@@ -138,6 +444,12 @@ const adapter = new class QQBotAdapter {
     const buffer = await Bot.Buffer(file)
     if (!Buffer.isBuffer(buffer)) return file
     if (isSilk(buffer)) return buffer
+
+    // 智能判断：已支持的音频格式直接返回，避免不必要的转码
+    if (!config.forceSilk) {
+      const ext = typeof file === 'string' ? file.split('?')[0].split('.').pop()?.toLowerCase() : ''
+      if (['silk', 'wav', 'mp3', 'flac'].includes(ext)) return file
+    }
 
     const convFile = join("temp", randomUUID())
     try {
@@ -371,7 +683,7 @@ const adapter = new class QQBotAdapter {
           message: button.callback,
           message_id: data._ret_id
         }
-        setTimeout(() => delete data.bot.callback[msg.id], 300000)
+        // setTimeout(() => delete data.bot.callback[msg.id], 300000)
       } else {
         msg.action = {
           type: button.type ?? 2,
@@ -472,9 +784,49 @@ const adapter = new class QQBotAdapter {
     let content = ''
     let reply
 
-    for (let i of Array.isArray(msg) ? msg : [msg]) {
+    const msgArray = Array.isArray(msg) ? msg : [msg]
+
+    // 图片并行上传：预先收集所有图片并行处理
+    const imageIndices = []
+    const imagePromises = []
+    for (let idx = 0; idx < msgArray.length; idx++) {
+      const item = msgArray[idx]
+      if (item && typeof item === 'object' && item.type === 'image') {
+        imageIndices.push(idx)
+        imagePromises.push(this.makeMarkdownImage(data, item.file, item.summary, item))
+      }
+    }
+    let imageResults = []
+    if (imagePromises.length > 0) {
+      try {
+        imageResults = await Promise.all(imagePromises)
+      } catch (err) {
+        Bot.makeLog('error', ['图片并行处理出错，降级为串行', err], data.self_id)
+        imageResults = []
+        for (let j = 0; j < imagePromises.length; j++) {
+          try {
+            const item = msgArray[imageIndices[j]]
+            imageResults.push(await this.makeMarkdownImage(data, item.file, item.summary, item))
+          } catch (e) {
+            Bot.makeLog('error', [`处理第${j + 1}张图片失败`, e], data.self_id)
+            imageResults.push({ des: '![图片加载失败]', url: '()' })
+          }
+        }
+      }
+    }
+
+    let imageIndex = 0
+    for (let i of msgArray) {
       if (typeof i === "object") i = { ...i }
       else i = { type: "text", text: Bot.String(i) }
+
+      // 使用预处理的图片结果
+      if (i.type === 'image' && imageResults[imageIndex]) {
+        const { des, url } = imageResults[imageIndex]
+        content += `${des}${url}`
+        imageIndex++
+        continue
+      }
 
       switch (i.type) {
         case 'record':
@@ -503,11 +855,10 @@ const adapter = new class QQBotAdapter {
         case 'text':
           content += await this.makeRawMarkdownText(data, i.text, keyboard && button)
           break
-        case 'image': {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i)
-          content += `${des}${url}`
+        case 'image':
+          // 已在预处理中处理，跳过
           break
-        } case 'markdown':
+        case 'markdown':
           if (typeof i.data == 'object') {
             let markdownObj = { type: 'markdown', ...i.data }
             // 添加对hide_avatar_and_center的支持
@@ -553,7 +904,12 @@ const adapter = new class QQBotAdapter {
       }
     }
 
-    if (content) messages.unshift([{ type: "markdown", content }])
+    if (content) {
+      const prefix = config.markdown?.prefix || ''
+      const suffix = config.markdown?.suffix || ''
+      if (prefix || suffix) content = prefix + content + suffix
+      messages.unshift([{ type: "markdown", content }])
+    }
 
     if (button.length) {
       for (const i of messages) {
@@ -657,9 +1013,55 @@ const adapter = new class QQBotAdapter {
     let reply
     const length = markdown_template?.params?.length || config.customMD?.[data.self_id]?.keys?.length || config.markdown.template.length
 
-    for (let i of Array.isArray(msg) ? msg : [msg]) {
+    const msgArray = Array.isArray(msg) ? msg : [msg]
+
+    // 图片并行上传：预先收集所有图片并行处理
+    const mdImageIndices = []
+    const mdImagePromises = []
+    for (let idx = 0; idx < msgArray.length; idx++) {
+      const item = msgArray[idx]
+      if (item && typeof item === 'object' && item.type === 'image') {
+        mdImageIndices.push(idx)
+        mdImagePromises.push(this.makeMarkdownImage(data, item.file, item.summary, item))
+      }
+    }
+    let mdImageResults = []
+    if (mdImagePromises.length > 0) {
+      try {
+        mdImageResults = await Promise.all(mdImagePromises)
+      } catch (err) {
+        Bot.makeLog('error', ['Markdown 图片并行处理出错，降级为串行', err], data.self_id)
+        mdImageResults = []
+        for (let j = 0; j < mdImagePromises.length; j++) {
+          try {
+            const item = msgArray[mdImageIndices[j]]
+            mdImageResults.push(await this.makeMarkdownImage(data, item.file, item.summary, item))
+          } catch (e) {
+            Bot.makeLog('error', [`处理第${j + 1}张图片失败`, e], data.self_id)
+            mdImageResults.push({ des: '![图片加载失败]', url: '()' })
+          }
+        }
+      }
+    }
+
+    let mdImageIndex = 0
+    for (let i of msgArray) {
       if (typeof i == 'object') i = { ...i }
       else i = { type: 'text', text: Bot.String(i) }
+
+      // 使用预处理的图片结果
+      if (i.type === 'image' && mdImageResults[mdImageIndex]) {
+        const { des, url } = mdImageResults[mdImageIndex]
+        template = this.makeMarkdownTemplatePush([[content, des]], template, templates)
+        const limit = template.length % (length - 1)
+        if (template.length && !limit) {
+          if (content) template.push(content)
+          template.push(des)
+        } else template.push(content + des)
+        content = url
+        mdImageIndex++
+        continue
+      }
 
       switch (i.type) {
         case 'record':
@@ -751,20 +1153,9 @@ const adapter = new class QQBotAdapter {
             }
             continue
           }
-        case 'image': {
-          const { des, url } = await this.makeMarkdownImage(data, i.file, i.summary, i)
-          template = this.makeMarkdownTemplatePush([[content, des]], template, templates)
-          const limit = template.length % (length - 1)
-
-          // 图片数量超过模板长度时
-          if (template.length && !limit) {
-            if (content) template.push(content)
-            template.push(des)
-          } else template.push(content + des)
-
-          content = url
+        case 'image':
+          // 已在预处理中处理，跳过
           break
-        }
         case 'markdown':
           if (typeof i.data == 'object') {
             let markdownObj = { type: 'markdown', ...i.data }
@@ -1777,11 +2168,6 @@ const adapter = new class QQBotAdapter {
     }
   }
 
-  async sendInputNotify(user_id, input_type, input_second, msg_id) {
-    const result = await data.bot.sdk.request.post(`/v2/users/${user_id}/messages`, { msg_type: 6, input_notify: { input_type, input_second }, msg_id })
-    return result.data?.ext_info || { ref_idx: '' }
-  }
-
   async recallMsg(data, recall, message_id) {
     if (!Array.isArray(message_id)) message_id = [message_id]
     const msgs = []
@@ -1828,7 +2214,8 @@ const adapter = new class QQBotAdapter {
       ...Bot[id].fl.get(user_id),
       self_id: id,
       bot: Bot[id],
-      user_id: user_id.replace(`${id}${this.sep}`, '')
+      user_id: user_id.replace(`${id}${this.sep}`, ''),
+      platform: 'QQ-private'
     }
     return {
       ...i,
@@ -1852,7 +2239,8 @@ const adapter = new class QQBotAdapter {
       self_id: id,
       bot: Bot[id],
       user_id: user_id.replace(`${id}${this.sep}`, ''),
-      group_id: group_id.replace(`${id}${this.sep}`, '')
+      group_id: group_id.replace(`${id}${this.sep}`, ''),
+      platform: 'QQ-group-member'
     }
     return {
       ...this.pickFriend(id, user_id),
@@ -1867,7 +2255,8 @@ const adapter = new class QQBotAdapter {
       ...Bot[id].gl.get(group_id),
       self_id: id,
       bot: Bot[id],
-      group_id: group_id.replace?.(`${id}${this.sep}`, '') || group_id
+      group_id: group_id.replace?.(`${id}${this.sep}`, '') || group_id,
+      platform: 'QQ-group'
     }
     return {
       ...i,
@@ -1883,7 +2272,8 @@ const adapter = new class QQBotAdapter {
       ...Bot[id].fl.get(user_id),
       self_id: id,
       bot: Bot[id],
-      user_id: user_id.replace(/^qg_/, '')
+      user_id: user_id.replace(/^qg_/, ''),
+      platform: 'guild-private'
     }
     return {
       ...i,
@@ -1901,7 +2291,8 @@ const adapter = new class QQBotAdapter {
       bot: Bot[id],
       src_guild_id: guild_id[0],
       src_channel_id: guild_id[1],
-      user_id: user_id.replace(/^qg_/, '')
+      user_id: user_id.replace(/^qg_/, ''),
+      platform: 'guild-channel-member'
     }
     return {
       ...this.pickGuildFriend(id, user_id),
@@ -1918,7 +2309,8 @@ const adapter = new class QQBotAdapter {
       self_id: id,
       bot: Bot[id],
       guild_id: guild_id[0],
-      channel_id: guild_id[1]
+      channel_id: guild_id[1],
+      platform: 'guild-channel'
     }
     return {
       ...i,
@@ -1961,11 +2353,19 @@ const adapter = new class QQBotAdapter {
 
     data.msg_elements = event.msg_elements || []
 
+    data.platform = 'QQ-private'
+
     data.sendInputNotify = input_second => data.bot.sendFriendInputNotify(data.openid, 1, input_second || 30, data.message_id)
 
     data.reply = msg =>
       this.sendFriendMsg({ ...data, user_id: event.sender.user_id }, msg, { id: data.message_id })
     await this.setFriendMap(data)
+
+    // 记录 C2C openid 用于召回
+    const rawUserOpenid = event.sender?.user_id || ''
+    if (rawUserOpenid) {
+      inviteStore.recordC2cUser(data.self_id, rawUserOpenid, event.event_id || '', event.timestamp || '')
+    }
   }
 
   async makeGroupMessage(data, event) {
@@ -1988,20 +2388,7 @@ const adapter = new class QQBotAdapter {
 
     data.reply_user = event.msg_elements?.[0]?.author || {}
 
-    data.mentions = event.mentions || []
-
-    let atUser = data.mentions.length ? [...data.mentions].reverse().find(m => !m.bot) : null
-
-    if (!atUser && data.mentions.length) {
-        atUser = data.mentions.at(-1);
-    }
-    
-    if (config.getAt) {
-      data.at = data.mentions.length ? data.mentions.slice().reverse().find(m => !m.bot)?.member_openid || data.mentions.at(-1)?.member_openid : null
-      data.at = data.at ? `${data.self_id}:${data.at}` : null
-      data.atall = data.mentions.some(m => m.scope === 'all')
-      data.atme = !!(data.at &&  atUser?.is_you)
-    }
+    data.platform = 'QQ-group'
 
     data.group_id = `${data.self_id}${this.sep}${event.group_id}`
     if (config.toQQUin && Handler.has('ws.tool.findUserId')) {
@@ -2034,6 +2421,7 @@ const adapter = new class QQBotAdapter {
       src_guild_id: event.src_guild_id
     }
     Bot.makeLog('info', `频道私聊消息：[${data.sender.nickname}(${data.user_id})] ${data.raw_message}`, data.self_id)
+    data.platform = 'guild-private'
     data.reply = msg =>
       this.sendDirectMsg(
         {
@@ -2068,6 +2456,7 @@ const adapter = new class QQBotAdapter {
       }
     }
     data.group_id = `qg_${event.guild_id}-${event.channel_id}`
+    data.platform = 'guild-channel'
     Bot.makeLog('info', `频道消息：[${data.group_id}, ${data.sender.nickname}(${data.user_id})] ${data.raw_message}`, data.self_id)
     data.reply = msg =>
       this.sendGuildMsg(
@@ -2109,12 +2498,64 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeMessage(id, event) {
-    if (event.author?.bot && config.filter_bot_msg) {
+    // 消息审核事件：兼容 SDK 不同版本的字段标识
+    const isAuditEvent = event.message_type === 'audit'
+      || event.message_type === 'audit.pass'
+      || event.constructor?.name === 'MessageAuditEvent'
+      || typeof event.audit_id !== 'undefined'
+      || typeof event.is_passed === 'boolean'
+    if (isAuditEvent) {
+      const subType = event.sub_type || (event.is_passed === true ? 'pass' : event.is_passed === false ? 'reject' : 'unknown')
+      const auditInfo = {
+        audit_id: event.audit_id,
+        message_id: event.message_id,
+        guild_id: event.guild_id,
+        channel_id: event.channel_id
+      }
+      Bot.makeLog('info', `消息审核${subType === 'pass' ? '通过' : subType === 'reject' ? '不通过' : '未知'} ${JSON.stringify(auditInfo)}`, id)
+      Bot.em(`notice.audit.${subType}`, {
+        ...event,
+        self_id: id,
+        bot: Bot[id],
+        post_type: 'notice',
+        notice_type: 'audit',
+        sub_type: subType
+      })
+      return
+    }
+
+    // 艾特了自己机器人时，删除所有出现的自己的艾特
+    const selfBotMentionIds = Array.isArray(event.mentions)
+      ? event.mentions
+        .filter(m => m?.bot === true && m?.is_you === true)
+        .flatMap(m => [m.id, m.member_openid])
+        .filter(Boolean)
+      : []
+    if (selfBotMentionIds.length) {
+      const mentionReg = new RegExp(selfBotMentionIds.map(i => `<@${_.escapeRegExp(i)}>`).join('|'), 'g')
+      if (event.raw_message) {
+        event.raw_message = event.raw_message.replace(mentionReg, '').replace(/[ \t]{2,}/g, ' ').trim()
+      }
+      if (event.content) {
+        event.content = event.content.replace(mentionReg, '').replace(/[ \t]{2,}/g, ' ').trim()
+      }
+    }
+
+    // 机器人消息过滤
+    if (config.filter_bot_msg) {
       // 发送方本身是机器人，直接丢弃
       if (event.author?.bot) return true
-      // 消息里 @ 了别的机器人（bot=true 且不是当前 Bot），丢弃
-      if (Array.isArray(event.mentions) && event.mentions.some(m => m?.bot === true && m?.is_you !== true)) return true
+      // 消息里 @ 了别的机器人（bot=true 且不是当前 Bot），或 @ 了全体成员但没 @ 自己，丢弃
+      if (Array.isArray(event.mentions)) {
+        const isBotMentioned = event.mentions.some(m => m?.is_you === true && m?.scope !== 'all')
+        if (!isBotMentioned && (event.mentions.some(m => m?.scope === 'all') || event.mentions.some(m => m?.bot === true && m?.is_you !== true))) return true
+      }
     }
+
+    const mentions = Array.isArray(event.mentions) ? event.mentions : []
+    const atUsers = mentions.filter(m => m?.is_you !== true)
+    const atStrs = atUsers.map(m => `${id}:${m.member_openid || m.id}`).filter(Boolean)
+    const atStr = atStrs.length ? atStrs.join('\n') : null
 
     const data = {
       raw: event,
@@ -2126,19 +2567,11 @@ const adapter = new class QQBotAdapter {
       message_id: event.message_id,
       get user_id() { return this.sender.user_id },
       message: this.normalizeSdkMessage(event.message),
-      raw_message: event.raw_message
-    }
-
-    if (event.message_type == 'audit.pass') {
-      Bot.makeLog('info', [`群主动消息审核：[${id}${this.sep}${event.group_openid}]`, event.sub_type], event.self_id)
-      Bot.em(`notice.audit.${event.sub_type}`, {
-        ...event,
-        self_id: id,
-        bot: Bot[id],
-        post_type: 'notice',
-        notice_type: 'audit'
-      })
-      return
+      raw_message: event.raw_message,
+      mentions,
+      at: config.getAt ? atStr : undefined,
+      atall: mentions.some(m => m.scope === 'all'),
+      atme: mentions.some(m => m?.is_you === true)
     }
 
     for (const i of data.message) {
@@ -2177,11 +2610,9 @@ const adapter = new class QQBotAdapter {
     try {
       data.bot.stat.recv_msg_cnt++
     } catch (err) {
-      // 如果直接递增失败，尝试使用赋值方式
       try {
         data.bot.stat.recv_msg_cnt = (data.bot.stat.recv_msg_cnt || 0) + 1
       } catch (err2) {
-        // 忽略错误，确保程序继续运行
         Bot.makeLog('debug', ['无法更新接收消息计数', err2], id)
       }
     }
@@ -2191,6 +2622,11 @@ const adapter = new class QQBotAdapter {
   }
 
   async makeCallback(id, event) {
+    // Claw 配置交互
+    if (event.data?.type === 2001 || event.data?.type === 2002) {
+      return this._makeClawConfigInteraction(id, event)
+    }
+
     const reply = event.reply.bind(event)
     event.reply = async (...args) => {
       try {
@@ -2252,6 +2688,7 @@ const adapter = new class QQBotAdapter {
       case 'direct':
       case 'friend':
         data.message_type = 'private'
+        data.platform = 'QQ-private'
         Bot.makeLog('info', [`好友按钮点击事件：[${data.user_id}]`, data.raw_message], data.self_id)
         data.reply = msg => this.sendFriendMsg(
           { ...data, user_id: event.operator_id },
@@ -2262,6 +2699,7 @@ const adapter = new class QQBotAdapter {
         break
       case 'group':
         data.group_id = `${id}${this.sep}${event.group_id}`
+        data.platform = 'QQ-group'
         Bot.makeLog('info', [`群按钮点击事件：[${data.group_id}, ${data.user_id}]`, data.raw_message], data.self_id)
         data.reply = msg => this.sendGroupMsg(
           { ...data, group_id: event.group_id },
@@ -2279,6 +2717,94 @@ const adapter = new class QQBotAdapter {
     Bot.em(`${data.post_type}.${data.message_type}.${data.sub_type}`, data)
   }
 
+  // ========== Claw 配置交互 ==========
+  async _makeClawConfigInteraction(id, event) {
+    const type = Number(event.data?.type)
+    const claw = ensureClawConfig(id)
+    const noticeData = {
+      raw: event,
+      bot: Bot[id],
+      self_id: id,
+      post_type: 'notice',
+      notice_type: 'claw_cfg',
+      sub_type: type === 2002 ? 'update' : 'query',
+      notice_id: event.notice_id,
+      group_id: event.group_id ? `${id}${this.sep}${event.group_id}` : '',
+      user_id: event.operator_id || event.user_id || '',
+      interaction_type: type,
+      resolved: event.data?.resolved || {}
+    }
+    Bot.em(`${noticeData.post_type}.${noticeData.notice_type}.${noticeData.sub_type}`, noticeData)
+
+    if (!claw.online) {
+      try { await event.reply(Number(claw.code) || 0) } catch {}
+      return
+    }
+
+    const body = {
+      code: claw.code === '0' ? 0 : Number(claw.code) || 0,
+      data: { claw_cfg: getClawCfg(id) }
+    }
+
+    try {
+      await event.bot.request.put(`/interactions/${event.notice_id}`, body)
+      Bot.makeLog('debug', ['龙虾配置交互响应成功', { type, body }], id)
+    } catch (err) {
+      Bot.makeLog('error', ['龙虾配置交互响应失败', err.message, err.response?.data], id)
+    }
+  }
+
+  // ========== 召回辅助 ==========
+  async _sendWakeupMessage(selfId, userOpenid, mdOverride, buttonOverride, buttonEnabledOverride, force = false) {
+    const bot = Bot[selfId]
+    if (!bot || bot.disabledRuntime) return { success: false, error: 'bot不可用' }
+
+    if (!force) {
+      const periodCheck = inviteStore.isWakeupSentInPeriod(selfId, userOpenid)
+      if (periodCheck.expired) return { success: false, error: '用户超过30天，不可召回', skipped: true }
+      if (periodCheck.sent) return { success: false, error: `当前周期(${periodCheck.period})已发送过召回`, skipped: true }
+    }
+
+    const rc = ensureRecallConfig(selfId)
+    const md = mdOverride || rc.markdown || ''
+    const btnEnabled = typeof buttonEnabledOverride === 'boolean' ? buttonEnabledOverride : rc.buttonEnabled
+    const btn = buttonOverride || rc.button
+    const isRaw = config.markdown?.[selfId] === 'raw'
+
+    const payload = {
+      msg_type: 0,
+      content: md || '。',
+      msg_seq: Math.floor(Math.random() * 1000000) + 1,
+      is_wakeup: true
+    }
+
+    if (isRaw && md) {
+      payload.msg_type = 2
+      payload.markdown = { content: md }
+      delete payload.content
+      if (btnEnabled && btn) {
+        payload.keyboard = { content: btn, bot_appid: Number(bot.info?.appid || 0) }
+      }
+    }
+
+    try {
+      const attemptPeriod = inviteStore.getUserWakeupPeriod(selfId, userOpenid)
+      if (attemptPeriod !== null) inviteStore.markWakeupAttempt(selfId, userOpenid, attemptPeriod)
+      const { data: result } = await bot.sdk.request.post(`/v2/users/${userOpenid}/messages`, payload)
+      Bot.makeLog('info', [`[${selfId}] 召回消息发送成功`, { userOpenid, id: result?.id }], selfId)
+      const period = inviteStore.getUserWakeupPeriod(selfId, userOpenid)
+      if (period !== null) inviteStore.markWakeupSent(selfId, userOpenid, period, result?.timestamp || '')
+      return { success: true, data: result }
+    } catch (err) {
+      const errCode = err.response?.data?.err_code || err.response?.data?.code || 0
+      const errMsg = err.response?.data?.message || err.message || ''
+      Bot.makeLog('warn', [`[${selfId}] 召回消息发送失败`, userOpenid, errMsg], selfId)
+      const period = inviteStore.getUserWakeupPeriod(selfId, userOpenid)
+      if (period !== null) inviteStore.markWakeupFailed(selfId, userOpenid, period, errCode, errMsg)
+      return { success: false, error: errMsg, errCode }
+    }
+  }
+
   makeNotice(id, event) {
     const data = {
       raw: event,
@@ -2289,7 +2815,8 @@ const adapter = new class QQBotAdapter {
       sub_type: event.sub_type,
       notice_id: event.notice_id,
       group_id: event.group_id,
-      user_id: event.user_id || event.operator_id
+      user_id: event.user_id || event.operator_id,
+      platform: 'QQ-notice'
     }
 
     switch (data.sub_type) {
@@ -2298,6 +2825,11 @@ const adapter = new class QQBotAdapter {
       case 'increase':
         Bot[data.self_id].dau.setDau('group_increase', data)
         if (event.notice_type === 'group') {
+          // 记录邀请 + 破冰
+          const inviterOpenid = event.operator_id || event.user_id || ''
+          if (inviterOpenid) {
+            inviteStore.recordGroupAdd(data.self_id, inviterOpenid, event.group_id, event.timestamp || '')
+          }
           const path = join(process.cwd(), 'plugins', 'QQBot-Plugin', 'Model', 'template', 'groupIncreaseMsg.js')
           if (fs.existsSync(path)) {
             import(`file://${path}`).then(i => i.default).then(async i => {
@@ -2313,11 +2845,24 @@ const adapter = new class QQBotAdapter {
             })
           }
         }
+        if (event.notice_type === 'friend') {
+          // 记录 C2C openid 用于召回
+          const userOpenid = event.user_id || ''
+          if (userOpenid) {
+            inviteStore.recordC2cUser(data.self_id, userOpenid, event.event_id || '', event.timestamp || '')
+          }
+        }
         data.reply = msg => this.sendGroupMsg({ ...data, group_id: event.group_id }, msg, { event_id: event.event_id })
         Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
         return
       case 'decrease':
         Bot[data.self_id].dau.setDau('group_decrease', data)
+        if (event.notice_type === 'group') {
+          const kickerOpenid = event.operator_id || event.user_id || ''
+          if (kickerOpenid) {
+            inviteStore.recordGroupDel(data.self_id, kickerOpenid, event.group_id, event.timestamp || '')
+          }
+        }
       case 'update':
       case 'member.increase':
       case 'member.decrease':
@@ -2499,15 +3044,47 @@ const adapter = new class QQBotAdapter {
       adapter: this,
       sdk: enhanceSDK(new QQBot(opts)),
       login() {
-        return new Promise(resolve => {
-          this.sdk.receiver.once("ready", resolve)
-          this.sdk.start()
+        return new Promise((resolve, reject) => {
+          if (this.disabledRuntime) { resolve(false); return }
+          if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null }
+          this.isReconnecting = false
+
+          const timer = setTimeout(() => {
+            if (this.disabledRuntime) { resolve(false); return }
+            reject(new Error('login timeout after 60s'))
+          }, 60000)
+
+          this.sdk.receiver.once("ready", () => {
+            clearTimeout(timer)
+            this.reconnectCount = 0
+            resolve()
+          })
+
+          this.sdk.start().catch(err => {
+            clearTimeout(timer)
+            if (this.disabledRuntime) { resolve(false); return }
+            const authError = getQQBotAuthError(err)
+            if (authError) {
+              Bot.makeLog('error', [`[${id}] ${authError}，中断连接`, err.message], id)
+              reject(new Error(authError))
+              return
+            }
+            Bot.makeLog('error', ['SDK start() 失败', err.message], id)
+            reject(err)
+          })
         })
       },
       logout() {
         return new Promise(resolve => {
-          this.sdk.receiver.once("close", resolve)
-          this.sdk.stop()
+          if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null }
+          if (!this.sdk.ws || this.sdk.ws.readyState !== 1) {
+            try { this.sdk.stop() } catch {}
+            resolve()
+            return
+          }
+          const timer = setTimeout(() => resolve(), 5000)
+          this.sdk.ws.once('close', () => { clearTimeout(timer); resolve() })
+          try { this.sdk.stop() } catch { clearTimeout(timer); resolve() }
         })
       },
 
@@ -2568,11 +3145,19 @@ const adapter = new class QQBotAdapter {
     Bot[id].sdk.logger = {}
     for (const i of ['trace', 'debug', 'info', 'mark', 'warn', 'error', 'fatal']) {
       Bot[id].sdk.logger[i] = (...args) => {
+        if (Bot[id]?.disabledRuntime) return
+        // 检测致命错误
+        const fatalWsErrorText = i === 'error'
+          ? args.map(arg => getQQBotFatalWsErrorText(arg)).find(text => text)
+          : ''
+        if (fatalWsErrorText) {
+          Bot.makeLog('error', [`[${id}] ${fatalWsErrorText}`, args], id)
+          disableBotRuntime(this, id, fatalWsErrorText)
+          return
+        }
         if (config.simplifiedSdkLog) {
           if (args?.[0]?.match?.(/^send to/)) {
-            args[0] = args[0].replace(/<(.+?)(,.*?)>/g, (v, k1, k2) => {
-              return `<${k1}>`
-            })
+            args[0] = args[0].replace(/<(.+?)(,.*?)>/g, (v, k1) => `<${k1}>`)
           } else if (args?.[0]?.match?.(/^recv from/)) {
             return
           }
@@ -2608,6 +3193,10 @@ const adapter = new class QQBotAdapter {
     }
 
     Bot.makeLog("mark", `${this.name}(${this.id}) ${this.version} ${Bot[id].nickname} 已连接`, id)
+
+    // 启动掉线检测
+    startOfflineCheck(this, id)
+
     Bot.em(`connect.${id}`, { self_id: id })
     return true
   }
@@ -2640,6 +3229,15 @@ const adapter = new class QQBotAdapter {
   async load() {
     Bot.express.use(`/${this.name}`, this.makeWebHook.bind(this))
     Bot.express.quiet.push(`/${this.name}`)
+
+    // 初始化召回/邀请存储
+    try {
+      await inviteStore.init(config.inviteDB || 'level')
+      Bot.makeLog('info', ['召回系统存储初始化完成', config.inviteDB || 'level'], 'QQBot-Plugin')
+    } catch (err) {
+      Bot.makeLog('error', ['召回系统存储初始化失败', err.message], 'QQBot-Plugin')
+    }
+
     for (const token of config.token) {
       await new Promise(resolve => {
         adapter.connect(token).then(resolve)
@@ -2768,7 +3366,7 @@ export class QQBotAdapter extends plugin {
   }
 
   refConfig() {
-    refConfig()
+    return configSave().then(() => this.reply('配置已刷新', true))
   }
 
   List() {

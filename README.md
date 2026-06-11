@@ -102,7 +102,6 @@ TRSS-Yunzai QQBot 适配器 插件
 12. `#QQBot一键群发`: 需要先配置模版 `template/oneKeySendGroupMsg_default.js`
 13. `config/QQBot.yaml`中`markdownImgScale: 1`是否对markdown中的图片进行等比例缩放,0.5为缩小50%,1.5为放大50%,以此类推
 14. `config/QQBot.yaml`中`sendButton: true`未开启全局MD时是否单独发送按钮
-15. 已适配YePanel,提供dau统计和设置功能
 
 ## 安装教程
 

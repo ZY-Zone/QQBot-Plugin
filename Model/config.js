@@ -11,6 +11,7 @@ let { config, configSave } = await makeConfig('QQBot', {
   toQRCode: false,
   toCallback: true,
   toBotUpload: true,
+  forceSilk: false,
   hideGuildRecall: false,
   imageLength: 3,
   toQQUin: false,
@@ -19,7 +20,9 @@ let { config, configSave } = await makeConfig('QQBot', {
   callStats: false,
   userStats: false,
   markdown: {
-    template: 'abcdefghij'
+    template: 'abcdefghij',
+    prefix: '',
+    suffix: ''
   },
   keyboard: {},  // 按钮模板ID映射，格式如："3889001286": "102076896_1763887100"
   filter_bot_msg: false,
@@ -37,6 +40,17 @@ let { config, configSave } = await makeConfig('QQBot', {
   smallbtn: false,
   chunkSize: 2,
   delay: 100,
+  bots: {},           // Per-bot 配置覆盖
+  offlineDetect: {    // 掉线检测配置
+    enabled: false,
+    interval: 5,
+    notify: true,
+    autoReconnect: true,
+    heartbeatTimeout: 30000
+  },
+  recall: { bots: {} },    // 召回系统配置
+  claw: { bots: {} },      // Claw 配置交互
+  inviteDB: 'level',       // 邀请/召回存储后端
   bot: {
     sandbox: false,
     maxRetry: Infinity,
