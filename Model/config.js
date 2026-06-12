@@ -41,13 +41,6 @@ let { config, configSave } = await makeConfig('QQBot', {
   chunkSize: 2,
   delay: 100,
   bots: {},           // Per-bot 配置覆盖
-  offlineDetect: {    // 掉线检测配置
-    enabled: false,
-    interval: 5,
-    notify: true,
-    autoReconnect: true,
-    heartbeatTimeout: 30000
-  },
   recall: { bots: {} },    // 召回系统配置
   claw: { bots: {} },      // Claw 配置交互
   inviteDB: 'level',       // 邀请/召回存储后端

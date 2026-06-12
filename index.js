@@ -60,17 +60,6 @@ function isQQBotSdkError(data) {
   return message.includes('request "') || message.includes('qq-official-bot') || message.includes('/gateway/bot')
 }
 
-function isQQBotNoOfficialWsError(data) {
-  return String(data?.message || data?.msg || data || '').includes('4925')
-}
-
-function getQQBotFatalWsErrorText(data) {
-  const message = String(data?.message || data?.msg || data || '')
-  if (message.includes('4925')) return '官方 websocket 不可用，请解绑元器'
-  if (message.includes('4903')) return '机器人停止服务(被回收)，请重新提审'
-  return ''
-}
-
 async function validateQQBotToken(tokenText) {
   const parts = String(tokenText || '').split(':')
   const [selfId, appid, token, secret, sandboxRaw, intentRaw] = parts
@@ -97,7 +86,7 @@ async function validateQQBotToken(tokenText) {
 // ========== 错误分类系统结束 ==========
 
 // ========== Per-bot 配置系统 ==========
-const PER_BOT_CONFIG_KEYS = ['toQRCode', 'toCallback', 'toBotUpload', 'forceSilk', 'toQQUin', 'toImg', 'callStats', 'userStats', 'offlineDetect']
+const PER_BOT_CONFIG_KEYS = ['toQRCode', 'toCallback', 'toBotUpload', 'forceSilk', 'toQQUin', 'toImg', 'callStats', 'userStats']
 
 function ensureBotConfig(selfId = '') {
   if (!config.bots || typeof config.bots !== 'object' || Array.isArray(config.bots)) config.bots = {}
@@ -106,10 +95,9 @@ function ensureBotConfig(selfId = '') {
   const botConfig = config.bots[key]
   for (const cfgKey of PER_BOT_CONFIG_KEYS) {
     if (typeof botConfig[cfgKey] === 'undefined' && typeof config[cfgKey] !== 'undefined') {
-      botConfig[cfgKey] = cfgKey === 'offlineDetect' ? { ...(config[cfgKey] || {}) } : config[cfgKey]
+      botConfig[cfgKey] = config[cfgKey]
     }
   }
-  if (!botConfig.offlineDetect || typeof botConfig.offlineDetect !== 'object') botConfig.offlineDetect = { ...(config.offlineDetect || {}) }
   return botConfig
 }
 
@@ -121,10 +109,6 @@ function getBotConfigValue(selfId, key) {
 function setBotConfigValue(selfId, key, value) {
   const botConfig = ensureBotConfig(selfId)
   botConfig[key] = value
-}
-
-function getOfflineDetectConfig(selfId = '') {
-  return ensureBotConfig(selfId).offlineDetect || {}
 }
 
 function getQRCodeRegExp(selfId = '') {
@@ -180,142 +164,6 @@ function getClawCfg(selfId = '') {
   return { ...CLAW_DEFAULT_CFG, ...claw.json, online_state: claw.online ? 'online' : 'offline' }
 }
 // ========== Claw 配置交互结束 ==========
-
-// ========== 掉线检测系统 ==========
-const offlineCheckState = { timers: {}, retrying: {}, waitingReset: {} }
-
-function clearRuntimeTimers(target, seen = new Set()) {
-  if (!target || typeof target !== 'object' || seen.has(target)) return
-  seen.add(target)
-  for (const [key, value] of Object.entries(target)) {
-    if (/timer|timeout|interval|heartbeat|reconnect/i.test(key)) {
-      if (value) { try { clearTimeout(value) } catch {} try { clearInterval(value) } catch {} }
-      try { target[key] = null } catch {}
-    }
-  }
-}
-
-async function getSessionInfo(id) {
-  try {
-    const { data } = await Bot[id].sdk.request.get('/gateway/bot')
-    return data?.session_start_limit || null
-  } catch (err) {
-    Bot.makeLog('debug', [`[${id}] 获取 Session 信息失败`, err.message], id)
-    return null
-  }
-}
-
-async function doOfflineCheck(adapter, id) {
-  if (Bot[id]?.disabledRuntime) return
-  if (offlineCheckState.retrying[id] || offlineCheckState.waitingReset[id]) return
-  if (!Bot[id]) return
-
-  const offlineDetect = getOfflineDetectConfig(id)
-  const sessionInfo = await getSessionInfo(id)
-  if (!sessionInfo) return
-
-  Bot.makeLog('debug', [`[${id}] Session 检测结果`, sessionInfo], id)
-
-  if (sessionInfo.remaining === 0) {
-    const resetMs = Number(sessionInfo.reset_after) || 0
-    const resetStr = formatDuration(resetMs, 'milliseconds')
-    Bot.makeLog('warn', [`[${id}] Session remaining=0，主动断开连接，将在 ${resetStr} 后自动重连`], id)
-
-    try { await Bot[id].logout() } catch {}
-
-    if (offlineDetect.notify) {
-      try { await Bot.sendMasterMsg(`[${id}] 账号下线：Session 配额耗尽，将在 ${resetStr} 后自动重连`) } catch {}
-    }
-
-    if (offlineDetect.autoReconnect && resetMs > 0) {
-      offlineCheckState.waitingReset[id] = setTimeout(async () => {
-        delete offlineCheckState.waitingReset[id]
-        await doReconnect(adapter, id)
-      }, resetMs)
-    }
-  }
-}
-
-async function doReconnect(adapter, id, retryCount = 0) {
-  if (Bot[id]?.disabledRuntime) return
-  if (offlineCheckState.retrying[id]) return
-  offlineCheckState.retrying[id] = true
-
-  const offlineDetect = getOfflineDetectConfig(id)
-  const maxRetries = 10
-  const retryDelay = Math.min(30000, 5000 * (retryCount + 1))
-
-  Bot.makeLog('warn', [`[${id}] 开始自动重连... (第 ${retryCount + 1} 次尝试)`], id)
-
-  try {
-    const bot = Bot[id]
-    if (!bot) return
-
-    if (bot.heartbeatTimer) { clearTimeout(bot.heartbeatTimer); bot.heartbeatTimer = null }
-
-    try { await bot.logout() } catch {}
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
-    await bot.login()
-    Bot.makeLog('warn', [`[${id}] 重新登录成功`], id)
-
-    offlineCheckState.retrying[id] = false
-    Bot.makeLog('warn', [`[${id}] 自动重连成功`], id)
-
-    if (offlineDetect.notify) {
-      try { await Bot.sendMasterMsg(`[${id}] 账号重连成功！`) } catch {}
-    }
-  } catch (err) {
-    Bot.makeLog('error', [`[${id}] 自动重连失败 (第 ${retryCount + 1} 次)`, err.message], id)
-    if (retryCount + 1 < maxRetries) {
-      offlineCheckState.waitingReset[id] = setTimeout(async () => {
-        delete offlineCheckState.waitingReset[id]
-        await doReconnect(adapter, id, retryCount + 1)
-      }, retryDelay)
-      return
-    } else {
-      Bot.makeLog('error', [`[${id}] 重连失败次数已达上限 (${maxRetries})，停止重试`], id)
-      if (offlineDetect.notify) {
-        try { await Bot.sendMasterMsg(`[${id}] 自动重连失败：已达最大重试次数，请手动处理`) } catch {}
-      }
-    }
-  } finally {
-    if (!offlineCheckState.waitingReset[id]) {
-      offlineCheckState.retrying[id] = false
-    }
-  }
-}
-
-function disableBotRuntime(adapter, id, reason = '') {
-  if (offlineCheckState.timers[id]) { clearInterval(offlineCheckState.timers[id]); delete offlineCheckState.timers[id] }
-  if (offlineCheckState.waitingReset[id]) { clearTimeout(offlineCheckState.waitingReset[id]); delete offlineCheckState.waitingReset[id] }
-  delete offlineCheckState.retrying[id]
-  const bot = Bot[id]
-  if (!bot || bot.disabledRuntime) return
-  bot.disabledRuntime = true
-  try { bot.sdk.sessionManager.getAccessToken = async () => ({ access_token: '', expires_in: '0' }) } catch {}
-  try { bot.sdk.sessionManager.getWsUrl = async () => '' } catch {}
-  try { bot.sdk.start = async () => false } catch {}
-  try { bot.sdk.sessionManager?.removeAllListeners?.() } catch {}
-  try { clearRuntimeTimers(bot.sdk.sessionManager) } catch {}
-  try { clearRuntimeTimers(bot.sdk) } catch {}
-  try { bot.sdk?.ws?.removeAllListeners?.() } catch {}
-  try { bot.sdk?.ws?.close?.() } catch {}
-  try { bot.sdk?.stop?.() } catch {}
-  Bot.makeLog('error', [`[${id}] 已停止该机器人运行态${reason ? `：${reason}` : ''}，配置未删除，重启后会按配置重新尝试连接`], id)
-}
-
-function startOfflineCheck(adapter, id) {
-  if (Bot[id]?.disabledRuntime) return
-  if (offlineCheckState.timers[id]) { clearInterval(offlineCheckState.timers[id]) }
-  const offlineDetect = getOfflineDetectConfig(id)
-  if (!offlineDetect.enabled) return
-  const intervalMin = Math.max(1, Math.min(30, Number(offlineDetect.interval) || 5))
-  const intervalMs = intervalMin * 60 * 1000
-  Bot.makeLog('info', [`[${id}] 启动掉线检测，间隔 ${intervalMin} 分钟`], id)
-  offlineCheckState.timers[id] = setInterval(() => doOfflineCheck(adapter, id), intervalMs)
-}
-// ========== 掉线检测系统结束 ==========
 
 function pickImageSizeOptions(options) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) return false
@@ -2553,9 +2401,7 @@ const adapter = new class QQBotAdapter {
     }
 
     const mentions = Array.isArray(event.mentions) ? event.mentions : []
-    const atUsers = mentions.filter(m => m?.is_you !== true)
-    const atStrs = atUsers.map(m => `${id}:${m.member_openid || m.id}`).filter(Boolean)
-    const atStr = atStrs.length ? atStrs.join('\n') : null
+    const atUsers = mentions.filter(m => !m.bot)
 
     const data = {
       raw: event,
@@ -2569,9 +2415,10 @@ const adapter = new class QQBotAdapter {
       message: this.normalizeSdkMessage(event.message),
       raw_message: event.raw_message,
       mentions,
-      at: config.getAt ? atStr : undefined,
+      at: config.getAt ? atUsers.map(m => `${id}:${m.member_openid || m.id}`).filter(Boolean) : undefined,
       atall: mentions.some(m => m.scope === 'all'),
-      atme: mentions.some(m => m?.is_you === true)
+      atme: mentions.some(m => m?.is_you === true),
+      atbot: mentions.some(m => m?.bot === true)
     }
 
     for (const i of data.message) {
@@ -2757,7 +2604,7 @@ const adapter = new class QQBotAdapter {
   // ========== 召回辅助 ==========
   async _sendWakeupMessage(selfId, userOpenid, mdOverride, buttonOverride, buttonEnabledOverride, force = false) {
     const bot = Bot[selfId]
-    if (!bot || bot.disabledRuntime) return { success: false, error: 'bot不可用' }
+    if (!bot) return { success: false, error: 'bot不可用' }
 
     if (!force) {
       const periodCheck = inviteStore.isWakeupSentInPeriod(selfId, userOpenid)
@@ -3044,47 +2891,15 @@ const adapter = new class QQBotAdapter {
       adapter: this,
       sdk: enhanceSDK(new QQBot(opts)),
       login() {
-        return new Promise((resolve, reject) => {
-          if (this.disabledRuntime) { resolve(false); return }
-          if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null }
-          this.isReconnecting = false
-
-          const timer = setTimeout(() => {
-            if (this.disabledRuntime) { resolve(false); return }
-            reject(new Error('login timeout after 60s'))
-          }, 60000)
-
-          this.sdk.receiver.once("ready", () => {
-            clearTimeout(timer)
-            this.reconnectCount = 0
-            resolve()
-          })
-
-          this.sdk.start().catch(err => {
-            clearTimeout(timer)
-            if (this.disabledRuntime) { resolve(false); return }
-            const authError = getQQBotAuthError(err)
-            if (authError) {
-              Bot.makeLog('error', [`[${id}] ${authError}，中断连接`, err.message], id)
-              reject(new Error(authError))
-              return
-            }
-            Bot.makeLog('error', ['SDK start() 失败', err.message], id)
-            reject(err)
-          })
+        return new Promise(resolve => {
+          this.sdk.receiver.once("ready", resolve)
+          this.sdk.start()
         })
       },
       logout() {
         return new Promise(resolve => {
-          if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null }
-          if (!this.sdk.ws || this.sdk.ws.readyState !== 1) {
-            try { this.sdk.stop() } catch {}
-            resolve()
-            return
-          }
-          const timer = setTimeout(() => resolve(), 5000)
-          this.sdk.ws.once('close', () => { clearTimeout(timer); resolve() })
-          try { this.sdk.stop() } catch { clearTimeout(timer); resolve() }
+          this.sdk.receiver.once("close", resolve)
+          this.sdk.stop()
         })
       },
 
@@ -3145,19 +2960,11 @@ const adapter = new class QQBotAdapter {
     Bot[id].sdk.logger = {}
     for (const i of ['trace', 'debug', 'info', 'mark', 'warn', 'error', 'fatal']) {
       Bot[id].sdk.logger[i] = (...args) => {
-        if (Bot[id]?.disabledRuntime) return
-        // 检测致命错误
-        const fatalWsErrorText = i === 'error'
-          ? args.map(arg => getQQBotFatalWsErrorText(arg)).find(text => text)
-          : ''
-        if (fatalWsErrorText) {
-          Bot.makeLog('error', [`[${id}] ${fatalWsErrorText}`, args], id)
-          disableBotRuntime(this, id, fatalWsErrorText)
-          return
-        }
         if (config.simplifiedSdkLog) {
           if (args?.[0]?.match?.(/^send to/)) {
-            args[0] = args[0].replace(/<(.+?)(,.*?)>/g, (v, k1) => `<${k1}>`)
+            args[0] = args[0].replace(/<(.+?)(,.*?)>/g, (v, k1, k2) => {
+              return `<${k1}>`
+            })
           } else if (args?.[0]?.match?.(/^recv from/)) {
             return
           }
@@ -3193,10 +3000,6 @@ const adapter = new class QQBotAdapter {
     }
 
     Bot.makeLog("mark", `${this.name}(${this.id}) ${this.version} ${Bot[id].nickname} 已连接`, id)
-
-    // 启动掉线检测
-    startOfflineCheck(this, id)
-
     Bot.em(`connect.${id}`, { self_id: id })
     return true
   }
