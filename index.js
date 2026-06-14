@@ -2401,7 +2401,7 @@ const adapter = new class QQBotAdapter {
     }
 
     const mentions = Array.isArray(event.mentions) ? event.mentions : []
-    const atUsers = mentions.filter(m => !m.bot)
+    const atUser = mentions.find(m => !m.bot) ?? mentions.at(-1) ?? null
 
     const data = {
       raw: event,
@@ -2415,7 +2415,7 @@ const adapter = new class QQBotAdapter {
       message: this.normalizeSdkMessage(event.message),
       raw_message: event.raw_message,
       mentions,
-      at: config.getAt ? atUsers.map(m => `${id}:${m.member_openid || m.id}`).filter(Boolean) : undefined,
+      at: config.getAt ? (atUser?.member_openid ? `${id}:${atUser.member_openid}` : null) : undefined,
       atall: mentions.some(m => m.scope === 'all'),
       atme: mentions.some(m => m?.is_you === true),
       atbot: mentions.some(m => m?.bot === true)
