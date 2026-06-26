@@ -1,4 +1,4 @@
-import { config, configSave } from '../model/index.js'
+import { config, configSave } from '../Model/index.js'
 
 export async function Markdown() {
     let token = this.e.msg.replace(/^#[Qq]+[Bb]ot[Mm](ark)?[Dd](own)?/i, '').trim().split(':')

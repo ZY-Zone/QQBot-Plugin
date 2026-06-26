@@ -1,4 +1,4 @@
-import { config, inviteStore } from '../model/index.js'
+import { config, inviteStore } from '../Model/index.js'
 
 function ensureRecallConfig(adapter, selfId = '') {
   if (!config.recall || typeof config.recall !== 'object') config.recall = {}

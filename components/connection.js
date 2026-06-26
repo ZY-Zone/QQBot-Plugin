@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto'
 import fetch from 'node-fetch'
 import { Bot as QQBot } from 'qq-official-bot'
 import { encode as encodeSilk, isSilk } from 'silk-wasm'
-import { config, Dau, inviteStore } from '../model/index.js'
-import { enhanceSDK, isSdk12, getSDKVersion } from '../model/sdkEnhancer.js'
+import { config, Dau, inviteStore } from '../Model/index.js'
+import { enhanceSDK, isSdk12, getSDKVersion } from '../Model/sdkEnhancer.js'
 
 async function makeRecord(adapter, file) {
     if (config.toBotUpload) for (const i of Bot.uin) {

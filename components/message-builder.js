@@ -1,6 +1,6 @@
 import _ from 'lodash'
 import { segment } from 'qq-official-bot'
-import { config, Runtime, Handler } from '../model/index.js'
+import { config, Runtime, Handler } from '../Model/index.js'
 import { TmplPkg, URL_REGEXP, URL_REGEXP_FULL, userIdCache, sharp, markdown_template } from '../utils/constants.js'
 import { patchSegmentImageSizeOptions, pickImageSizeOptions, convertURL } from '../utils/helpers.js'
 import { makeMarkdownImage } from './image.js'

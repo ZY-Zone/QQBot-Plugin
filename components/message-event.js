@@ -1,7 +1,7 @@
 import _ from 'lodash'
 import fs from 'node:fs'
 import { join } from 'node:path'
-import { config, inviteStore, Handler, Runtime } from '../model/index.js'
+import { config, inviteStore, Handler, Runtime } from '../Model/index.js'
 import { userIdCache } from '../utils/constants.js'
 import { sendFriendMsg, sendGroupMsg, sendDirectMsg, sendGuildMsg } from './message-sender.js'
 import { setFriendMap, setGroupMap } from './picker.js'

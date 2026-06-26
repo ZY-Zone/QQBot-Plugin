@@ -1,4 +1,4 @@
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { PER_BOT_CONFIG_KEYS } from '../utils/constants.js'
 
 export { PER_BOT_CONFIG_KEYS }

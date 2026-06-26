@@ -1,5 +1,5 @@
 import _ from 'lodash'
-import { config, configSave, importJS } from '../model/index.js'
+import { config, configSave, importJS } from '../Model/index.js'
 
 export async function refConfig() {
     return configSave().then(() => this.reply('配置已刷新', true))
@@ -7,7 +7,7 @@ export async function refConfig() {
 
 export async function oneKeySendGroupMsg() {
     if (this.e.adapter_name !== 'QQBot') return false
-    const msg = await importJS('model/template/oneKeySendGroupMsg.js', 'default')
+    const msg = await importJS('Model/template/oneKeySendGroupMsg.js', 'default')
     if (msg === false) {
         this.reply('请先设置模版哦', true)
     } else {

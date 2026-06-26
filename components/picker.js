@@ -1,4 +1,4 @@
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { userIdCache } from '../utils/constants.js'
 
 function pickFriend(adapter, id, user_id) {

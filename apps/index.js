@@ -1,5 +1,5 @@
 import plugin from '../../../lib/plugins/plugin.js'
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { setMap } from './admin/setting.js'
 import { List, Token, QRLogin } from './admin/account.js'
 import { ImageLength, Setting, filterLog, turn_filter_bot } from './admin/setting.js'

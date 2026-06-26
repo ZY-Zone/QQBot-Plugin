@@ -1,6 +1,6 @@
 import _ from 'lodash'
 import { segment } from 'qq-official-bot'
-import { config, Runtime, Handler } from '../model/index.js'
+import { config, Runtime, Handler } from '../Model/index.js'
 import { TmplPkg } from '../utils/constants.js'
 import { makeMsg, makeRawMarkdownMsg, makeMarkdownMsg, makeGuildMsg } from './message-builder.js'
 import { sendFiles } from './file.js'

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import _ from 'lodash'
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { URL_REGEXP, URL_REGEXP_FULL, userIdCache } from '../utils/constants.js'
 import { makeQRCode, makeMarkdownImage } from './image.js'
 

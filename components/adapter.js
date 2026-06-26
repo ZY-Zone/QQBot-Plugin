@@ -1,6 +1,6 @@
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { URL_REGEXP, URL_REGEXP_FULL } from '../utils/constants.js'
-import { isSdk12, getSDKVersion } from '../model/sdkEnhancer.js'
+import { isSdk12, getSDKVersion } from '../Model/sdkEnhancer.js'
 import { installConnection } from './connection.js'
 import { installMessageEvent } from './message-event.js'
 import { installMessageBuilder } from './message-builder.js'

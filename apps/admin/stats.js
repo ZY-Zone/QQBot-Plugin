@@ -1,4 +1,4 @@
-import { config } from '../../model/index.js'
+import { config } from '../../Model/index.js'
 
 export async function DAUStat() {
   const pro = this.e.msg.includes('pro')

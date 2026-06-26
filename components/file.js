@@ -2,7 +2,7 @@ import _ from 'lodash'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import fetch from 'node-fetch'
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 
 export function _parseFileSegment(adapter, i, data) {
   let fileData = {

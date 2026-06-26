@@ -1,4 +1,4 @@
-import { importJS } from './model/index.js'
+import { importJS } from './Model/index.js'
 import { initSharp, initMarkdownTemplate, initTmplPkg } from './utils/constants.js'
 import { patchSegmentImageSizeOptions, patchSegmentFile } from './utils/helpers.js'
 
@@ -7,7 +7,7 @@ const startLog = () => logger.info(logger.yellow('- 正在加载 QQBot 适配器
 
 // 异步初始化全局变量
 try {
-  const mdTemplate = await importJS('model/template/markdownTemplate.js', 'default')
+  const mdTemplate = await importJS('Model/template/markdownTemplate.js', 'default')
   if (mdTemplate) initMarkdownTemplate(mdTemplate)
 } catch {}
 try {
@@ -15,7 +15,7 @@ try {
   if (tmpl) initTmplPkg(tmpl)
 } catch {}
 if (true) {
-  const { config } = await import('./model/index.js')
+  const { config } = await import('./Model/index.js')
   if (config.imageLength) try {
     const s = (await import("sharp")).default
     initSharp(s)

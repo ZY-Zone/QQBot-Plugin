@@ -1,7 +1,7 @@
 import QRCode from 'qrcode'
 import imageSize from 'image-size'
 import fetch from 'node-fetch'
-import { config, Handler } from '../model/index.js'
+import { config, Handler } from '../Model/index.js'
 import { URL_REGEXP_FULL, sharp } from '../utils/constants.js'
 import { pickImageSizeOptions } from '../utils/helpers.js'
 import { makeButtons } from './button.js'

@@ -1,4 +1,4 @@
-import { config } from '../model/index.js'
+import { config } from '../Model/index.js'
 import { CLAW_DEFAULT_CFG } from '../utils/constants.js'
 
 function ensureClawConfig(adapter, selfId = '') {

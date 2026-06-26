@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import { join } from 'node:path'
 import { adapter } from '../../components/adapter.js'
-import { config, configSave } from '../../model/index.js'
-import { qrRegister, BindStatus } from '../../model/qr-auth.js'
+import { config, configSave } from '../../Model/index.js'
+import { qrRegister, BindStatus } from '../../Model/qr-auth.js'
 
 export async function List() {
   this.reply(`共${config.token.length}个账号：\n${config.token.join('\n')}`, true)

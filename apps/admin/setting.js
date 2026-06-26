@@ -1,5 +1,5 @@
 import _ from 'lodash'
-import { config, configSave } from '../../model/index.js'
+import { config, configSave } from '../../Model/index.js'
 import { sharp } from '../../utils/constants.js'
 
 export const setMap = {
