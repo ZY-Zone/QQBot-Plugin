@@ -64,7 +64,7 @@ async function makeFriendMessage(adapter, data, event) {
   if (rawUserOpenid) {
     inviteStore.recordC2cUser(data.self_id, rawUserOpenid, event.event_id || '', event.timestamp || '')
   }
-  data.raw.invite = inviteStore.queryByUser(data.self_id, rawUserOpenid) || undefined
+  data.raw.invite = inviteStore.getInvite(data.self_id, rawUserOpenid)
 }
 
 async function makeGroupMessage(adapter, data, event) {
