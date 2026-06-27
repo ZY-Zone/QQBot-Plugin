@@ -22,7 +22,8 @@ let { config, configSave } = await makeConfig('QQBot', {
   markdown: {
     template: 'abcdefghij',
     prefix: '',
-    suffix: ''
+    suffix: '',
+    affixMode: 'smart' // smart: 多行/图片/按钮/显式markdown注入；all: 所有raw markdown注入
   },
   keyboard: {},  // 按钮模板ID映射，格式如："3889001286": "102076896_1763887100"
   filter_bot_msg: false,
