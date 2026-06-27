@@ -7,6 +7,26 @@ import { makeMarkdownImage } from './image.js'
 import { makeButton, makeButtons, makeTextChain, makeTextChains, makeMarkdownText_, makeMarkdownText, makeMarkdownTemplate, makeMarkdownTemplatePush } from './button.js'
 import { _parseFileSegment } from './file.js'
 
+const MARKDOWN_AFFIX_SMART_TYPES = new Set(['image', 'button', 'markdown', 'raw', 'node'])
+
+function getMarkdownAffixMode() {
+  const mode = String(config.markdown?.affixMode || 'smart').trim().toLowerCase()
+  return mode === 'all' ? 'all' : 'smart'
+}
+
+function shouldApplyMarkdownAffix(content, msgArray) {
+  if (getMarkdownAffixMode() === 'all') return true
+  if (/[\r\n]/.test(content)) return true
+  return msgArray.some(i => i && typeof i === 'object' && MARKDOWN_AFFIX_SMART_TYPES.has(i.type))
+}
+
+function applyMarkdownAffix(content, msgArray) {
+  const prefix = config.markdown?.prefix || ''
+  const suffix = config.markdown?.suffix || ''
+  if (!prefix && !suffix) return content
+  return shouldApplyMarkdownAffix(content, msgArray) ? `${prefix}${content}${suffix}` : content
+}
+
 export async function makeRawMarkdownMsg(adapter, data, msg, keyboard) {
   patchSegmentImageSizeOptions()
   const messages = []
@@ -132,9 +152,7 @@ export async function makeRawMarkdownMsg(adapter, data, msg, keyboard) {
   }
 
   if (content) {
-    const prefix = config.markdown?.prefix || ''
-    const suffix = config.markdown?.suffix || ''
-    if (prefix || suffix) content = prefix + content + suffix
+    content = applyMarkdownAffix(content, msgArray)
     messages.unshift([{ type: "markdown", content }])
   }
 
