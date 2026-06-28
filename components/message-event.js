@@ -8,7 +8,18 @@ import { setFriendMap, setGroupMap } from './picker.js'
 import { _makeClawConfigInteraction } from './claw.js'
 
 function getQQBotActualMessageId(event) {
-  return event.simple_message_id || event.message_id || (event.msg_elements?.[0]?.simple_message_id)
+  const candidates = [
+    event.simple_message_id,
+    event.raw?.id,
+    event.raw?.message_id,
+    event.id,
+    event.message_id,
+    event.msg_id,
+    event.msg_elements?.[0]?.simple_message_id
+  ].filter(Boolean).map(String)
+  return candidates.find(id => /^ROBOT\d+\.\d+_/i.test(id))
+    || candidates.find(id => !/^(GROUP_MESSAGE_CREATE|GROUP_AT_MESSAGE_CREATE|C2C_MESSAGE_CREATE|MESSAGE_CREATE|INTERACTION_CREATE):/i.test(id))
+    || candidates[0] || event.message_id || ''
 }
 
 function mergeAdjacentTextSegments(segments) {

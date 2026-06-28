@@ -78,7 +78,7 @@ function enhanceSdk12(sdk) {
           if (typeof tokenInfo.expires_in === 'string') {
             tokenInfo.expires_in = parseInt(tokenInfo.expires_in, 10) || 0
           }
-          if (tokenInfo.expires_in < 300) return await this.fetchNewToken()
+          if (tokenInfo.expires_in < 30) return await this.fetchNewToken()
           return tokenInfo
         }
       }

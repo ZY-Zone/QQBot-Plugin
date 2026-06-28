@@ -115,6 +115,19 @@ TRSS-Yunzai QQBot 适配器 插件
    ```
    - 后端搭建[[QQBotWs](https://github.com/Admilkk/QQBotWs)]
 16. `config/QQBot.yaml`中`forceSilk: true`强制将语音转为silk格式再发送
+17. `config/QQBot.yaml`中`markdown.prefix`/`markdown.suffix`为原生MD消息注入固定前后缀文本，`markdown.affixMode`控制注入策略
+    - `prefix`: 在所有原生MD内容前插入的文本（如 `"【Bot】"`）
+    - `suffix`: 在所有原生MD内容后插入的文本（如 `"\n---\nPowered by QQBot"`）
+    - `affixMode`: 可选 `smart`（默认）或 `all`
+      - `smart`: 仅在内容包含多行、图片、按钮、显式markdown或node元素时注入
+      - `all`: 所有raw markdown消息均注入
+    ```yml
+    markdown:
+      template: abcdefghij
+      prefix: '【Bot】\n'      # 前缀（需用单引号包裹转义符）
+      suffix: '\n---'          # 后缀
+      affixMode: smart         # smart(默认) | all
+    ```
 
 <details><summary>QR扫码登录</summary>
 
