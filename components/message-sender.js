@@ -98,6 +98,7 @@ async function sendMsg(adapter, data, send, msg) {
 export function sendFriendMsg(adapter, data, msg, event) {
   if (!event) event = {}
   if (data.smallbtn) event.smallbtn = true
+  if (data.forceVerifyImageResource) event.forceVerifyImageResource = true
   return sendMsg(adapter, data, msg => {
     if (data.smallbtn) event.smallbtn = true
     const options = {
@@ -112,6 +113,7 @@ export function sendFriendMsg(adapter, data, msg, event) {
 export async function sendGroupMsg(adapter, data, msg, event) {
   if (!event) event = {}
   if (data.smallbtn) event.smallbtn = true
+  if (data.forceVerifyImageResource) event.forceVerifyImageResource = true
 
   if (Handler.has('QQBot.group.sendMsg')) {
     const res = await Handler.call(

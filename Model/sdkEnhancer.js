@@ -66,8 +66,57 @@ function enhanceWsAndBotInfo(sessionManager) {
 
 function enhanceSdk12(sdk) {
 
+  // 补全 SDK 事件映射：
+  // - GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE（1<<24 群成员变化，SDK>=1.2.4 已内置，缺失时兜底）
+  // - GROUP_JOIN_REQUEST（1<<25 用户申请加群，SDK 未内置，需手动映射为 request.group，sub_type=add）
+  try {
+    const eventsMod = require('qq-official-bot/lib/events/index.js')
+    const QQEvent = eventsMod?.QQEvent
+    if (QQEvent) {
+      if (!QQEvent.GROUP_MEMBER_ADD) QQEvent.GROUP_MEMBER_ADD = 'notice.group.member.increase'
+      if (!QQEvent.GROUP_MEMBER_REMOVE) QQEvent.GROUP_MEMBER_REMOVE = 'notice.group.member.decrease'
+      if (!QQEvent.GROUP_JOIN_REQUEST) QQEvent.GROUP_JOIN_REQUEST = 'request.group'
+      if (!QQEvent.SUBSCRIBE_MESSAGE_STATUS) QQEvent.SUBSCRIBE_MESSAGE_STATUS = 'notice.subscribe_message'
+      if (eventsMod.EventParserMap && !eventsMod.EventParserMap.has('request.group')) {
+        eventsMod.EventParserMap.set('request.group', function (event, result) {
+          return Object.assign(result, {
+            sub_type: result.sub_type || 'add',
+            user_id: result.member_openid ?? result.user_id,
+            group_id: result.group_openid ?? result.group_id,
+            raw_user_id: result.member_openid,
+            join_request_id: result.join_request_id ?? result.flag,
+          })
+        })
+      }
+      if (eventsMod.EventParserMap && !eventsMod.EventParserMap.has('notice.subscribe_message')) {
+        eventsMod.EventParserMap.set('notice.subscribe_message', function (event, result) {
+          return Object.assign(result, {
+            sub_type: result.sub_type || 'status',
+            user_id: result.openid ?? result.user_id,
+            group_id: result.group_openid ?? result.group_id,
+          })
+        })
+      }
+    }
+  } catch (e) {
+    sdk.logger?.debug?.('[SDK-ENHANCER] 群事件映射补全失败', e?.message)
+  }
+
   if (sdk.sessionManager) {
     enhanceWsAndBotInfo(sdk.sessionManager)
+
+    // 群成员事件订阅兜底：确保 websocket 连接订阅中包含 1<<24（GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE）
+    // 仅对配置了 GROUP_MEMBER intent（群机器人）时强制置位，SDK>=1.2.4 原生支持，此处为幂等兜底
+    const originalGetValidIntends = sdk.sessionManager.getValidIntends?.bind(sdk.sessionManager)
+    if (originalGetValidIntends) {
+      sdk.sessionManager.getValidIntends = function () {
+        let result = originalGetValidIntends()
+        if ((this.bot?.config?.intents || []).includes('GROUP_MEMBER')) {
+          result = result | (1 << 24)
+        }
+        return result
+      }
+    }
 
     if (sdk.sessionManager.authManager) {
       const originalFetchNewToken = sdk.sessionManager.authManager.fetchNewToken
@@ -181,6 +230,8 @@ function enhanceSdk12(sdk) {
           }
           this.messagePayload.keyboard.content.style = { font_size: "small" }
         }
+        // 校验图片转存结果：转存失败则返回错误且不发送消息
+        if (this.source?.forceVerifyImageResource) this.messagePayload.force_verify_image_resource = true
       }
     }
   } catch (e) {}
@@ -203,6 +254,18 @@ function enhanceSdk12(sdk) {
       }
 
       return await this.sendRegularMessage(endpointPath, buildResult, options)
+    }
+  }
+
+  // 接口域名增强：自定义 ApiUrl 优先，其次沙箱，默认使用官方正式域名 api.bot.qq.com（2026-08 起生效）
+  const apiUrl = sdk.config?.ApiUrl
+  if (sdk.request?.defaults) {
+    if (typeof apiUrl === 'string' && apiUrl.startsWith('http')) {
+      sdk.request.defaults.baseURL = apiUrl
+    } else if (sdk.config?.sendbox || sdk.config?.sandbox) {
+      sdk.request.defaults.baseURL = 'https://sandbox.api.sgroup.qq.com'
+    } else {
+      sdk.request.defaults.baseURL = 'https://api.bot.qq.com'
     }
   }
 

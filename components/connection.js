@@ -138,6 +138,22 @@ async function connect(adapter, token) {
         return result
       },
 
+      // —— 群管理 API（对齐 OneBotv11 命名，底层调用官方 v2 接口）——
+      getGroupInfo: group_openid => adapter.getGroupInfo(id, group_openid),
+      getGroupBotState: group_openid => adapter.getGroupBotState(id, group_openid),
+      getGroupMemberInfo: (group_openid, member_openid) => adapter.getGroupMemberInfo(id, group_openid, member_openid),
+      getGroupMuteState: group_openid => adapter.getGroupMuteState(id, group_openid),
+      setGroupBan: (group_openid, member_openid, duration) => adapter.setGroupBan(id, group_openid, member_openid, duration),
+      getGroupJoinRequestList: (group_openid, cursor, limit) => adapter.getGroupJoinRequestList(id, group_openid, cursor, limit),
+      setGroupAddRequest: (group_openid, member_openid, approve, reason, join_request_id) =>
+        adapter.approvalJoinRequest(id, group_openid, member_openid, { approve, join_request_id, reject_reason: reason }),
+      getJoinApprovalStrategies: (cursor, limit) => adapter.getJoinApprovalStrategies(id, cursor, limit),
+      createJoinApprovalStrategy: body => adapter.createJoinApprovalStrategy(id, body),
+      updateJoinApprovalStrategy: (strategy_id, body) => adapter.updateJoinApprovalStrategy(id, strategy_id, body),
+      deleteJoinApprovalStrategy: strategy_id => adapter.deleteJoinApprovalStrategy(id, strategy_id),
+      executeJoinApprovalStrategy: strategy_id => adapter.executeJoinApprovalStrategy(id, strategy_id),
+      updateJoinApprovalWhitelist: (strategy_id, op, whitelist_users) => adapter.updateJoinApprovalWhitelist(id, strategy_id, op, whitelist_users),
+
       async sendFriendInputNotify(user_id, input_type, input_second, msg_id) {
         const result = await this.sdk.request.post(`/v2/users/${user_id}/messages`, {
           msg_type: 6,
@@ -147,7 +163,18 @@ async function connect(adapter, token) {
         return result.data?.ext_info || { ref_idx: '' }
       },
 
-      callback: {}
+      // 获取机器人资料页分享链接，callback_data 用于来源归因追踪
+      async generateUrlLink(callback_data) {
+        const { data: result } = await this.sdk.request.post('/v2/generate_url_link', { callback_data })
+        return result
+      },
+
+      callback: {},
+
+      request_list: [],
+      getRequestList() {
+        return this.request_list
+      },
     }
 
     Bot[id].sdk.logger = {}
@@ -171,6 +198,7 @@ async function connect(adapter, token) {
         Bot.makeLog('error', [`${adapter.name} makeMessage`, e], id))
     })
     Bot[id].sdk.on('notice', event => adapter.makeNotice(id, event))
+    Bot[id].sdk.on('request', event => adapter.makeGroupJoinRequest(id, event))
     Bot[id].sdk.on('FORUM_POST_CREATE', event => adapter.makeForumPost(id, event))
     Bot[id].sdk.on('FORUM_POST_DELETE', event => adapter.makeForumPostDelete(id, event))
     Bot[id].sdk.on('FORUM_REPLY_CREATE', event => adapter.makeForumReply(id, event))

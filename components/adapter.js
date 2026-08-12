@@ -12,6 +12,7 @@ import { installPicker } from './picker.js'
 import { installRecall } from './recall.js'
 import { installClaw } from './claw.js'
 import { installConfigHelpers } from './config.js'
+import { installGroupManage } from './group-manage.js'
 
 export class QQBotAdapterEngine {
   constructor() {
@@ -48,6 +49,7 @@ export class QQBotAdapterEngine {
     installRecall(this)
     installClaw(this)
     installConfigHelpers(this)
+    installGroupManage(this)
   }
 
   normalizeSdkMessage(segments) {

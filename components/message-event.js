@@ -469,6 +469,18 @@ function makeNotice(adapter, id, event) {
       data.reply = msg => sendGroupMsg(adapter, { ...data, group_id: event.group_id }, msg, { event_id: event.event_id })
       Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
       Bot.em(`${data.post_type}.${data.notice_type}.member.${data.sub_type}`, data)
+      // 对齐 OneBotv11 格式：群成员加入群聊(GROUP_MEMBER_ADD) → notice.group_increase.approve
+      if (data.sub_type === 'member.increase') {
+        const onebot = {
+          ...data,
+          notice_type: 'group_increase',
+          sub_type: 'approve',
+          user_id: `${data.self_id}${adapter.sep}${event.user_id}`,
+          group_id: `${data.self_id}${adapter.sep}${event.group_id}`,
+          operator_id: event.operator_id ? `${data.self_id}${adapter.sep}${event.operator_id}` : undefined
+        }
+        Bot.em('notice.group_increase.approve', onebot)
+      }
       return
     case 'decrease':
     case 'member.decrease':
@@ -502,6 +514,18 @@ function makeNotice(adapter, id, event) {
       data.reply = msg => sendGroupMsg(adapter, { ...data, group_id: event.group_id }, msg, { event_id: event.event_id })
       Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
       Bot.em(`${data.post_type}.${data.notice_type}.member.${data.sub_type}`, data)
+      // 对齐 OneBotv11 格式：群成员退出群聊(GROUP_MEMBER_REMOVE) → notice.group_decrease.leave
+      if (data.sub_type === 'member.decrease') {
+        const onebot = {
+          ...data,
+          notice_type: 'group_decrease',
+          sub_type: 'leave',
+          user_id: `${data.self_id}${adapter.sep}${event.user_id}`,
+          group_id: `${data.self_id}${adapter.sep}${event.group_id}`,
+          operator_id: event.operator_id ? `${data.self_id}${adapter.sep}${event.operator_id}` : undefined
+        }
+        Bot.em('notice.group_decrease.leave', onebot)
+      }
       return
     case 'update':
     case 'member.update':
@@ -512,11 +536,66 @@ function makeNotice(adapter, id, event) {
     case 'receive_close':
       Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
       break
+    case 'status':
+      // 订阅消息授权状态变更（SUBSCRIBE_MESSAGE_STATUS）
+      data.result = event.result || []
+      data.openid = event.user_id || ''
+      Bot.makeLog('info', `订阅消息授权状态变更：[用户:${data.user_id}${data.group_id ? `, 群:${data.group_id}` : ''}] ${data.result.length} 个模板`, data.self_id)
+      Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
+      return
     default:
       Bot.makeLog('warn', ['未知通知', event], id)
   }
 
   Bot.em(`${data.post_type}.${data.notice_type}.${data.sub_type}`, data)
+}
+
+function makeGroupJoinRequest(adapter, id, event) {
+  const groupOpenid = event.group_id || event.group_openid
+  const memberOpenid = event.user_id || event.member_openid
+
+  const data = {
+    raw: event,
+    bot: Bot[id],
+    self_id: id,
+    post_type: 'request',
+    request_type: 'group',
+    sub_type: 'add',
+    platform: 'QQ-group',
+    group_id: `${id}${adapter.sep}${groupOpenid}`,
+    group_openid: groupOpenid,
+    user_id: `${id}${adapter.sep}${memberOpenid}`,
+    raw_user_id: memberOpenid,
+    nickname: event.username || '',
+    comment: event.verify_info?.verify_message || event.risk_tips || '',
+    flag: event.join_request_id || event.flag || event.notice_id || event.event_id || '',
+    join_request_id: event.join_request_id || '',
+    risk_tips: event.risk_tips || '',
+    apply_source: event.apply_source || '',
+    invited_by: event.invited_by || '',
+    verify_info: event.verify_info,
+    time: event.apply_at || event.timestamp
+  }
+
+  // 对齐 OneBotv11：approve(approve, reason) 调用审批接口
+  data.approve = async (approve, reason) => {
+    try {
+      return await adapter.approvalJoinRequest(id, groupOpenid, memberOpenid, {
+        approve,
+        join_request_id: data.join_request_id,
+        reject_reason: !approve ? reason : undefined
+      })
+    } catch (err) {
+      Bot.makeLog('error', ['审批加群请求失败', data.group_id, data.user_id, err], id)
+      throw err
+    }
+  }
+
+  data.bot.request_list ??= []
+  data.bot.request_list.push(data)
+
+  Bot.makeLog('info', `加群请求：${data.sub_type} ${data.comment}(${data.flag})`, data.self_id)
+  Bot.em(`${data.post_type}.${data.request_type}.${data.sub_type}`, data)
 }
 
 function makeForumPost(adapter, id, event) {
@@ -640,6 +719,7 @@ export function installMessageEvent(adapter) {
   adapter.makeMessage = (id, event) => makeMessage(adapter, id, event)
   adapter.makeCallback = (id, event) => makeCallback(adapter, id, event)
   adapter.makeNotice = (id, event) => makeNotice(adapter, id, event)
+  adapter.makeGroupJoinRequest = (id, event) => makeGroupJoinRequest(adapter, id, event)
   adapter.makeForumPost = (id, event) => makeForumPost(adapter, id, event)
   adapter.makeForumPostDelete = (id, event) => makeForumPostDelete(adapter, id, event)
   adapter.makeForumReply = (id, event) => makeForumReply(adapter, id, event)

@@ -52,12 +52,27 @@ function pickGroup(adapter, id, group_id) {
     group_id: group_id.replace?.(`${id}${adapter.sep}`, '') || group_id,
     platform: 'QQ-group'
   }
+  const openid = value => String(value ?? '').replace(`${id}${adapter.sep}`, '')
   return {
     ...i,
     sendMsg: msg => adapter.sendGroupMsg(i, msg),
     pickMember: user_id => adapter.pickMember(id, group_id, user_id),
     recallMsg: message_id => adapter.recallGroupMsg(i, message_id),
-    getMemberMap: () => i.bot.gml.get(group_id)
+    getMemberMap: () => i.bot.gml.get(group_id),
+    // —— 群管理 API（对齐 OneBotv11 命名，底层调用官方 v2 接口）——
+    getInfo: () => adapter.getGroupInfo(id, i.group_id),
+    getBotState: () => adapter.getGroupBotState(id, i.group_id),
+    getMuteState: () => adapter.getGroupMuteState(id, i.group_id),
+    getGroupMemberInfo: user_id => adapter.getGroupMemberInfo(id, i.group_id, openid(user_id)),
+    muteMember: (user_id, duration) => adapter.setGroupBan(id, i.group_id, openid(user_id), duration),
+    getJoinRequestList: (cursor, limit) => adapter.getGroupJoinRequestList(id, i.group_id, cursor, limit),
+    approveJoinRequest: (member_openid, options) => adapter.approvalJoinRequest(id, i.group_id, openid(member_openid), options),
+    getJoinApprovalStrategies: (cursor, limit) => adapter.getJoinApprovalStrategies(id, cursor, limit),
+    createJoinApprovalStrategy: body => adapter.createJoinApprovalStrategy(id, body),
+    updateJoinApprovalStrategy: (strategy_id, body) => adapter.updateJoinApprovalStrategy(id, strategy_id, body),
+    deleteJoinApprovalStrategy: strategy_id => adapter.deleteJoinApprovalStrategy(id, strategy_id),
+    executeJoinApprovalStrategy: strategy_id => adapter.executeJoinApprovalStrategy(id, strategy_id),
+    updateJoinApprovalWhitelist: (strategy_id, op, whitelist_users) => adapter.updateJoinApprovalWhitelist(id, strategy_id, op, whitelist_users)
   }
 }
 
