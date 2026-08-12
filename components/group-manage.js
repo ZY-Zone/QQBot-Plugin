@@ -13,31 +13,42 @@ async function request(adapter, id, method, url, body) {
 }
 
 function toOpenid(adapter, id, value) {
-  return String(value ?? '').replace(`${id}${adapter.sep}`, '')
+  value = String(value ?? '')
+  // 兼容适配器群 id 规则（self_id:openid），openid 为 32 位十六进制不含冒号
+  value = value.replace(`${id}${adapter.sep}`, '')
+  const idx = value.lastIndexOf(':')
+  if (idx > -1) value = value.slice(idx + 1)
+  return value
 }
 
 // —— 群基础信息 ——
 
 function getGroupInfo(adapter, id, group_openid) {
+  group_openid = toOpenid(adapter, id, group_openid)
   return request(adapter, id, 'get', `/v2/groups/${group_openid}/info`)
 }
 
 function getGroupBotState(adapter, id, group_openid) {
+  group_openid = toOpenid(adapter, id, group_openid)
   return request(adapter, id, 'get', `/v2/groups/${group_openid}/bot_state`)
 }
 
 function getGroupMemberInfo(adapter, id, group_openid, member_openid) {
+  group_openid = toOpenid(adapter, id, group_openid)
+  member_openid = toOpenid(adapter, id, member_openid)
   return request(adapter, id, 'get', `/v2/groups/${group_openid}/members/${member_openid}`)
 }
 
 // —— 群禁言管理（/v2/groups/{group_openid}/restrict_chat_setting）——
 
 function getGroupMuteState(adapter, id, group_openid) {
+  group_openid = toOpenid(adapter, id, group_openid)
   return request(adapter, id, 'get', `/v2/groups/${group_openid}/restrict_chat_setting`)
 }
 
 // duration 单位秒；>0 增加/更新禁言，<=0 解除禁言；mute_expire_at 为 RFC3339 格式
 function setGroupBan(adapter, id, group_openid, member_openid, duration = 0) {
+  group_openid = toOpenid(adapter, id, group_openid)
   const time = Number(duration)
   const members = [{
     op: time > 0 ? 'add' : 'del',
@@ -50,6 +61,7 @@ function setGroupBan(adapter, id, group_openid, member_openid, duration = 0) {
 // —— 入群申请管理 ——
 
 function getGroupJoinRequestList(adapter, id, group_openid, cursor = '', limit = 20) {
+  group_openid = toOpenid(adapter, id, group_openid)
   const qs = new URLSearchParams()
   if (cursor) qs.set('cursor', cursor)
   qs.set('limit', limit)
@@ -58,6 +70,8 @@ function getGroupJoinRequestList(adapter, id, group_openid, cursor = '', limit =
 
 // options: { op?: 'approve'|'decline', approve?: boolean, join_request_id?, reject_reason?, add_to_member_blacklist? }
 function approvalJoinRequest(adapter, id, group_openid, member_openid, options = {}) {
+  group_openid = toOpenid(adapter, id, group_openid)
+  member_openid = toOpenid(adapter, id, member_openid)
   const body = { op: options.op ?? (options.approve ? 'approve' : 'decline') }
   if (options.join_request_id) body.join_request_id = options.join_request_id
   if (body.op === 'decline' && options.reject_reason) body.reject_reason = String(options.reject_reason)
