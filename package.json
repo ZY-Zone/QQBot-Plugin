@@ -7,6 +7,9 @@
     "tweetnacl": "^1.0.3",
     "qrcode": "^1.5.4",
     "silk-wasm": "^3.6.1",
-    "sharp": "^0.33.5"
+    "sharp": "^0.35.3"
+  },
+  "overrides": {
+    "axios": "1.19.0"
   }
 }
